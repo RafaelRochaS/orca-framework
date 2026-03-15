@@ -1,0 +1,8 @@
+# Open5GS Subscriber Database
+# Format: IMSI, K, OPc (or OP), AMF, SQN, slice_sst, slice_sd, session_apn, ip_addr
+#
+# These credentials MUST match the UE config (ue_zmq.conf)
+# Algorithm: Milenage
+#
+# IMSI             K                                OPc                              AMF   SQN
+001010123456780,00112233445566778899aabbccddeeff,63bfa50ee6523365ff14c1f45f88737d,8000,000000000000

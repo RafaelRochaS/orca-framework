@@ -1,0 +1,98 @@
+# =============================================================================
+# srsRAN Project — gNB Configuration (ZMQ RF, E2 agent enabled)
+# PLMN: 00101 | Band n3 (1800MHz) | ZMQ transport to srsUE
+# =============================================================================
+
+gnb_id: 0x411
+gnb_id_bit_length: 22
+ran_node_name: srsgnb01
+
+# PLMN — must match Open5GS and UE
+plmn_list:
+  - plmn: "00101"
+    tac: 7
+    pdcp_sn_size_dl: 18
+    pdcp_sn_size_ul: 18
+    slices:
+      - sst: 1       # eMBB
+      - sst: 2       # URLLC (for QoD experiments)
+
+# =============================================================================
+# RF / PHY — ZMQ (no hardware needed)
+# The gNB and UE connect via ZMQ sockets on the Docker ran network
+# =============================================================================
+ru_sdr:
+  device_driver: zmq
+  # gNB TX (downlink) → UE RX, gNB RX (uplink) ← UE TX
+  # The gNB binds its TX socket; the UE connects to it (and vice versa for RX).
+  device_args: "tx_port=tcp://*:2000,rx_port=tcp://10.53.2.40:2001,base_srate=11.52e6"
+  srate: 11.52e6      # 10 MHz BW
+  tx_gain: 75
+  rx_gain: 75
+
+cell_cfg:
+  dl_arfcn: 368500    # Band n3, ~1842.5 MHz DL centre
+  band: 3
+  channel_bandwidth_MHz: 10
+  common_scs: 15       # 15kHz SCS (FR1 default)
+  plmn: "00101"
+  tac: 7
+  pci: 1
+
+# =============================================================================
+# 5G Core connectivity — N2 (NGAP/SCTP) to Open5GS AMF
+# =============================================================================
+amf:
+  addr: ${AMF_ADDR:-10.53.1.2}    # Open5GS AMF — matches gradiant/open5gs IP convention
+  bind_addr: 10.53.1.30           # gNB's own IP on the core network
+
+# =============================================================================
+# O-RAN E2 Agent — connects to Near-RT RIC for KPM/RC xApps
+# =============================================================================
+e2:
+  enable: true
+  addr: ${RIC_ADDR:-10.53.2.100}  # O-RAN SC RIC e2term IP
+  port: 36421                      # SCTP port (standard E2AP)
+  bind_addr: 10.53.2.30
+  # Retry interval: RIC may start after gNB — the E2 agent retries automatically
+  connect_timeout_s: 60
+
+# E2SM service models to advertise
+e2sm:
+  e2sm_kpm:
+    enabled: true
+    version: v3
+  e2sm_rc:
+    enabled: true
+    version: v1
+
+# =============================================================================
+# Logging
+# =============================================================================
+log:
+  all_level: warning
+  lib_level: error
+  filename: /dev/stdout
+
+# =============================================================================
+# QoS and slicing (relevant for CAMARA QoD experiments)
+# =============================================================================
+qos:
+  # QoS Flow -> DRB mapping for 5QI values used by QoD API
+  # 5QI 1 → GBR conversational voice (used by QoD throughput boost)
+  # 5QI 9 → Non-GBR default
+  5qi_table:
+    - 5qi: 1
+      priority: 20
+      packet_delay_budget: 100
+    - 5qi: 9
+      priority: 90
+      packet_delay_budget: 300
+
+# Metrics (Prometheus format, scraped by Grafana)
+metrics:
+  enable: true
+  addr: 10.53.2.30
+  port: 55555
+  autostart_stdout_metrics: false
+  period_ms: 1000

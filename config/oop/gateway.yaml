@@ -1,0 +1,11 @@
+orchestrator_url: "http://10.53.3.40:8090"
+open5gs_nef_url: "http://10.53.3.20:7777"
+open5gs_pcf_url: "http://10.53.3.20:7000"
+log_level: "INFO"
+
+# CAMARA API authentication (OIDC / OAuth2)
+# For lab use, set to "none" to disable auth requirement
+auth:
+  mode: none   # options: none | oidc | api_key
+  issuer: ""
+  audience: ""
