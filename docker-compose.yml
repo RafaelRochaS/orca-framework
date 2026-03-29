@@ -65,7 +65,7 @@ services:
   #    we honour that here so configs/gnb_zmq.yaml stays consistent.
   # =============================================================================
   open5gs:
-    image: gradiant/open5gs:2.2.0
+    image: gradiant/open5gs:2.7.6
     platform: linux/amd64
     container_name: lab_open5gs
     restart: unless-stopped
