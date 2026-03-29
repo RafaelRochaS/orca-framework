@@ -201,11 +201,13 @@ services:
       start_period: 20s
 
   # =============================================================================
-  # 6. ETSI OpenOP — Service Orchestrator (CAMARA → 5GC/RAN translation)
+  # 6. ETSI OpenOP — Service Resource Manager (CAMARA → 5GC/RAN translation)
+  #    Built from the upstream repo: labs.etsi.org/rep/oop/code/service-resource-manager
+  #    Connexion/Flask app on port 8080 — receives requests from OEG
   # =============================================================================
   oop-orchestrator:
     build:
-      context: ./oop/orchestrator
+      context: ./repos/openop/service-resource-manager/service-resource-manager-implementation
       dockerfile: Dockerfile
     image: lab_oop_orchestrator:latest
     container_name: lab_oop_orchestrator
@@ -218,14 +220,14 @@ services:
       ran:
         ipv4_address: 10.53.2.50
     ports:
-      - "8090:8090"           # Orchestrator management API
-    volumes:
-      - ./config/oop/orchestrator.yaml:/app/config/orchestrator.yaml:ro
+      - "8090:8080"           # Host 8090 → container 8080 (SRM listens on 8080)
     environment:
-      OPEN5GS_PCF_URL: "http://10.53.3.20:7000"
-      OPEN5GS_SMF_URL: "http://10.53.3.20:7001"
-      RIC_A1_URL: "http://10.53.2.100:10000"  # A1 interface to Near-RT RIC
-      LOG_LEVEL: "INFO"
+      NETWORK_ADAPTER_NAME: "open5gs"
+      NETWORK_ADAPTER_BASE_URL: "http://10.53.3.20:7777"    # Open5GS NEF
+      EDGE_CLOUD_ADAPTER_NAME: ""                            # not used in lab
+      ADAPTER_BASE_URL: ""                                   # not used in lab
+      PLATFORM_PROVIDER: "ORCA"
+      ARTIFACT_MANAGER_ADDRESS: ""                           # not used in lab
     depends_on:
       - oop-gateway
 

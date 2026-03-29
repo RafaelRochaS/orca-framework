@@ -49,7 +49,7 @@ cmd_build() {
   docker compose -f "${COMPOSE_FILE}" build ocudu-ue
   info "Building OOP Gateway (Open Exposure Gateway)..."
   docker compose -f "${COMPOSE_FILE}" build oop-gateway
-  info "Building OOP Orchestrator..."
+  info "Building OOP Service Resource Manager..."
   docker compose -f "${COMPOSE_FILE}" build oop-orchestrator
   success "All images built. Run ./lab.sh up to start the lab."
 }
