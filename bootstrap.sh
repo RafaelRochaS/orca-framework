@@ -144,22 +144,13 @@ clone_repos() {
   local REPOS_DIR="${SCRIPT_DIR}/repos"
   mkdir -p "${REPOS_DIR}"
 
-  # OCUDU (gNB with E2 agent)
+  # OCUDU (gNB + UE — single repo provides both binaries)
   if [[ ! -d "${REPOS_DIR}/ocudu" ]]; then
-    info "  → Cloning OCUDU (gNB)..."
+    info "  → Cloning OCUDU (gNB + UE)..."
     git clone --depth 1 https://gitlab.com/ocudu/ocudu.git \
       "${REPOS_DIR}/ocudu"
   else
     warn "  OCUDU already cloned, skipping"
-  fi
-
-  # OCUDU 4G (for UE — ZMQ UE simulator)
-  if [[ ! -d "${REPOS_DIR}/ocudu-4g" ]]; then
-    info "  → Cloning OCUDU 4G (UE)..."
-    git clone --depth 1 https://gitlab.com/ocudu/ocudu.git \
-      "${REPOS_DIR}/ocudu-4g"
-  else
-    warn "  OCUDU 4G already cloned, skipping"
   fi
 
   # O-RAN SC RIC (Docker Compose — no Kubernetes needed)

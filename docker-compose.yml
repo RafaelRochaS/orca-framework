@@ -140,14 +140,10 @@ services:
 
   # =============================================================================
   # 4. OCUDU UE — ZMQ-based UE simulator (optional, started via ./lab.sh ue)
+  #    Reuses the same image as the gNB — both binaries are in the OCUDU build.
   # =============================================================================
   ocudu-ue:
-    build:
-      context: ./repos/ocudu-4g
-      dockerfile: docker/Dockerfile
-      args:
-        OS_VERSION: "24.04"
-    image: lab_ocudu_ue:latest
+    image: lab_ocudu_gnb:latest
     container_name: lab_ue
     restart: "no"            # start manually via lab.sh ue
     privileged: true
@@ -158,8 +154,10 @@ services:
         ipv4_address: 10.53.2.40
     volumes:
       - ./config/ocudu/ue_zmq.conf:/config/ue.conf:ro
-    command: >
-      srsue /config/ue.conf
+    command: srsue /config/ue.conf
+    depends_on:
+      ocudu-gnb:
+        condition: service_started
     profiles:
       - ue                   # only started when explicitly requested
 

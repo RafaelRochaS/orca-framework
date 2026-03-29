@@ -40,13 +40,11 @@ usage() {
 # RIC must be up before gNB tries to connect via E2
 cmd_build() {
   echo ""
-  warn "The OCUDU gNB image must be compiled from source with ZMQ support."
+  warn "The OCUDU image must be compiled from source with ZMQ support."
   warn "This takes 15-25 minutes on first run (subsequent builds use layer cache)."
   echo ""
-  info "Building OCUDU gNB (ZMQ-enabled)..."
+  info "Building OCUDU (gNB + UE, ZMQ-enabled)..."
   docker compose -f "${COMPOSE_FILE}" build ocudu-gnb
-  info "Building OCUDU UE..."
-  docker compose -f "${COMPOSE_FILE}" build ocudu-ue
   info "Building OOP Gateway (Open Exposure Gateway)..."
   docker compose -f "${COMPOSE_FILE}" build oop-gateway
   info "Building OOP Service Resource Manager..."
@@ -60,7 +58,7 @@ cmd_up() {
 
   # Pre-flight: check if gNB image exists — it needs a source build first
   if ! docker image inspect lab_ocudu_gnb:latest &>/dev/null; then
-    warn "OCUDU gNB image not found — a source build is required."
+    warn "OCUDU image not found — a source build is required."
     warn "This will take 15-25 minutes on first run."
     read -rp "Build now? (yes/no): " confirm
     if [[ "${confirm}" == "yes" ]]; then

@@ -31,31 +31,18 @@ orca-framework/
 ├── config/
 │   ├── open5gs/          # 5GC config + subscriber DB (IMSI/K/OPc)
 │   ├── ocudu/            # gNB ZMQ config + UE config
-│   ├── oop/              # Gateway + orchestrator YAML configs
 │   └── grafana/          # Datasource provisioning
-│
-├── oop/
-│   ├── gateway/          # FastAPI — CAMARA northbound API exposure
-│   │   └── src/
-│   │       ├── main.py           # App entry point, router registration
-│   │       ├── config.py         # Pydantic settings (env-driven)
-│   │       └── routers/
-│   │           ├── qod.py        # QoD CAMARA API ← primary research target
-│   │           ├── device_status.py
-│   │           └── health.py
-│   └── orchestrator/     # FastAPI — CAMARA→5GC+RIC southbound translation
-│       └── src/
-│           └── main.py   # PCF (N5) + A1 policy signalling logic
 │
 ├── xapps/
 │   └── qod-xapp/
 │       └── qod_xapp.py   # QoD xApp scaffold — A1 + KPM + RC control
 │
 └── repos/                # Cloned by bootstrap.sh — DO NOT edit files here
-    ├── ocudu/            # gNB source (built by lab.sh build)
-    ├── ocudu-4g/         # OCUDU UE source
+    ├── ocudu/            # gNB + UE source (single build, both binaries)
     ├── oran-sc-ric/      # O-RAN SC RIC (has its own docker-compose.yml)
-    └── openop/           # ETSI OpenOP repos (some may be .stub placeholders)
+    └── openop/           # ETSI OpenOP repos (built by lab.sh build)
+        ├── open-exposure-gateway/        # OEG — CAMARA northbound gateway
+        └── service-resource-manager/     # SRM — CAMARA→5GC/RAN translation
 ```
 
 ---
@@ -134,21 +121,21 @@ causes silent RF failure — no errors, no traffic.
 
 ---
 
-## CAMARA API conventions
+## CAMARA API layer (ETSI OpenOP)
 
-All APIs live at `/camara/{api-name}/{version}/` on the gateway.
+The CAMARA layer uses the upstream ETSI OpenOP components, built from repos
+cloned into `repos/openop/` by `bootstrap.sh`:
 
-When adding a new router:
-1. **Models** — Pydantic v2, named exactly as in the CAMARA spec schema
-2. **Errors** — `{"status": N, "code": "CAMARA_ERROR_CODE", "message": "..."}`
-3. **Async** — all southbound calls to the orchestrator must use `async`/`httpx`
-4. **Session creation** — return status `REQUESTED` immediately, resolve to
-   `AVAILABLE`/`UNAVAILABLE` via FastAPI `BackgroundTasks`
-5. **Auth** — `gateway.yaml` sets `auth.mode: none` for lab use; don't add
-   auth enforcement until research logic is stable
+- **Open Exposure Gateway (OEG)** — Connexion/Flask app that exposes the
+  northbound CAMARA APIs (Edge Cloud LCM, QoD, Traffic Influence). Swagger UI
+  at `http://localhost:8080/docs/`. Source: `repos/openop/open-exposure-gateway/`.
+- **Service Resource Manager (SRM)** — Connexion/Flask app that translates
+  CAMARA requests into southbound calls to the 5GC and RAN adapters. The OEG
+  forwards requests to the SRM at `SRM_HOST`. Source:
+  `repos/openop/service-resource-manager/service-resource-manager-implementation/`.
 
-The orchestrator's internal API is under `/internal/` — called by the gateway
-only, never exposed externally.
+Both images are built during `./lab.sh build`. Do not edit files inside
+`repos/` — patch via volume mounts if needed.
 
 ---
 
@@ -185,18 +172,13 @@ If broken, the fallback is the full O-RAN SC RIC via `ric-dep` on a `kind`
 cluster. Update this section when the issue is resolved or the fallback
 is implemented.
 
-### ETSI OpenOP repos (status: PARTIAL)
-Repos under `labs.etsi.org/rep/oop/code/` are cloned individually.
-Some may be `.stub` placeholders if the slug wasn't resolvable. Check
-`repos/openop/` and note which are real. The `oop/` scaffold works regardless.
+### ETSI OpenOP repos (status: ACTIVE)
+The CAMARA layer uses the upstream ETSI OpenOP repos cloned into `repos/openop/`:
+- `open-exposure-gateway` — OEG, CAMARA northbound (Edge Cloud LCM + QoD)
+- `service-resource-manager` — SRM, CAMARA→infrastructure translation
 
-Confirmed public:
-- `open-exposure-gateway` — CAMARA northbound (Edge Cloud LCM + QoD)
-- `federation-manager` — GSMA OPG East-Westbound federation
-
-Probed but unconfirmed:
-- `open-service-orchestrator`
-- `oop-common`
+Both are built from source during `./lab.sh build` and used directly as
+Docker services (`oop-gateway`, `oop-orchestrator`).
 
 ### OCUDU gNB ZMQ build (status: RESOLVED)
 Must be built with `-DENABLE_EXPORT=ON -DENABLE_ZEROMQ=ON`.
@@ -218,16 +200,12 @@ If you see "Factory for radio type zmq not found", rebuild with `./lab.sh build`
 
 ---
 
-## Adding Python dependencies
-
-Add to the relevant `requirements.txt`, then rebuild:
-```bash
-docker compose build oop-gateway      # or oop-orchestrator
-```
-
 ## Adding a new CAMARA API
 
-1. `oop/gateway/src/routers/my_api.py` — models + FastAPI router
-2. Register in `oop/gateway/src/main.py`
-3. Southbound logic in `oop/orchestrator/src/main.py`
-4. `docker compose build oop-gateway oop-orchestrator && ./lab.sh restart`
+The OEG and SRM are upstream ETSI OpenOP components built from `repos/openop/`.
+Do not edit files inside `repos/` directly — instead, extend via volume mounts
+or contribute upstream. To rebuild after changes:
+
+```bash
+docker compose build oop-gateway oop-orchestrator && ./lab.sh restart
+```
