@@ -6,6 +6,12 @@
 set -eo pipefail
 
 # ── Create TUN device for UPF ────────────────────────────────────────────────
+if [ ! -c /dev/net/tun ]; then
+    mkdir -p /dev/net
+    mknod /dev/net/tun c 10 200
+    chmod 666 /dev/net/tun
+fi
+
 if ! grep -q "ogstun" /proc/net/dev 2>/dev/null; then
     ip tuntap add name ogstun mode tun
 fi
