@@ -198,7 +198,7 @@ clone_repos() {
   clone_openop_repo "open-exposure-gateway" "open-exposure-gateway"
   clone_openop_repo "federation-manager" "federation-manager"
   clone_openop_repo "service-resource-manager" "service-resource-manager"
-  clone_openop_repo "transformation-function-sdk" "transformation-function-sdk"
+  clone_openop_repo "transformation-function-sdk" "tf-sdk"
 
   local cloned=0; local stubbed=0
   for d in "${REPOS_DIR}/openop"/*/; do
