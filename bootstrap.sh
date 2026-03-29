@@ -195,12 +195,10 @@ clone_repos() {
   mkdir -p "${REPOS_DIR}/openop"
 
   # Confirmed public repos (Release 0):
-  clone_openop_repo "open-exposure-gateway"     "open-exposure-gateway"
-  clone_openop_repo "federation-manager"        "federation-manager"
-
-  # Additional repos to probe — may or may not exist:
-  clone_openop_repo "open-service-orchestrator" "open-service-orchestrator"
-  clone_openop_repo "oop-common"                "oop-common"
+  clone_openop_repo "open-exposure-gateway" "open-exposure-gateway"
+  clone_openop_repo "federation-manager" "federation-manager"
+  clone_openop_repo "service-resource-manager" "service-resource-manager"
+  clone_openop_repo "transformation-function-sdk" "transformation-function-sdk"
 
   local cloned=0; local stubbed=0
   for d in "${REPOS_DIR}/openop"/*/; do
@@ -261,7 +259,7 @@ main() {
   echo -e "${CYAN}"
   echo "  ╔══════════════════════════════════════════════╗"
   echo "  ║   5G Research Lab — Bootstrap                ║"
-  echo "  ║   OCUDU · Open5GS · O-RAN RIC · ETSI OOP   ║"
+  echo "  ║   OCUDU · Open5GS · O-RAN RIC · ETSI OOP     ║"
   echo "  ╚══════════════════════════════════════════════╝"
   echo -e "${NC}"
 
