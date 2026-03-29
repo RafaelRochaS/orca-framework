@@ -84,14 +84,12 @@ services:
     volumes:
       - ./config/open5gs/open5gs.yaml:/opt/open5gs/etc/open5gs/open5gs.yaml:ro
       - ./config/open5gs/subscriber_db.csv:/opt/open5gs/subscriber_db.csv:ro
+      - ./docker/open5gs-run.sh:/usr/local/bin/open5gs-run.sh:ro
+    command: /usr/local/bin/open5gs-run.sh
     environment:
-      MONGODB_IP: "10.53.1.10"
-      OPEN5GS_IP: "10.53.1.2"
-      AMF_IP: "10.53.1.2"           # gNB AMF_ADDR must match this
-      UPF_ADVERTISED_IP: "10.53.1.2"
-      SUBSCRIBER_DB: "/opt/open5gs/subscriber_db.csv"
-      UE_IP_BASE: "10.45.0"         # UE IP pool
-      DEBUG: "false"
+      DB_URI: "mongodb://10.53.1.10/open5gs"
+      IPV4_TUN_ADDR: "10.45.0.1/16"
+      IPV4_TUN_SUBNET: "10.45.0.0/16"
     depends_on:
       mongodb:
         condition: service_healthy

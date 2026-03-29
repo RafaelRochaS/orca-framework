@@ -187,24 +187,16 @@ clone_repos() {
         "https://labs.etsi.org/rep/oop/code/${slug}.git" "${dest}" 2>/dev/null; then
       success "    openop/${name} cloned"
     else
-      warn "    openop/${name} not accessible — skipping (lab scaffold will be used instead)"
-      mkdir -p "${dest}" && touch "${dest}/.stub"
+      warn "    openop/${name} not accessible"
     fi
   }
 
   mkdir -p "${REPOS_DIR}/openop"
 
-  # Confirmed public repos (Release 0):
   clone_openop_repo "open-exposure-gateway" "open-exposure-gateway"
   clone_openop_repo "federation-manager" "federation-manager"
   clone_openop_repo "service-resource-manager" "service-resource-manager"
   clone_openop_repo "transformation-function-sdk" "tf-sdk"
-
-  local cloned=0; local stubbed=0
-  for d in "${REPOS_DIR}/openop"/*/; do
-    if [[ -f "${d}/.stub" ]]; then ((stubbed++)); else ((cloned++)); fi
-  done
-  info "  OpenOP repos: ${cloned} cloned, ${stubbed} unavailable (using local scaffold)"
 
   success "Repositories ready at ${REPOS_DIR}"
 }
