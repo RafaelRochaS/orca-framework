@@ -37,7 +37,7 @@ It is designed as a foundation for:
 │                        Ubuntu 24.04 VM                          │
 │                                                                 │
 │  ┌──────────────┐  ZMQ RF   ┌─────────────────────────────┐     │
-│  │   OCUDU UE   │◄─────────►│  OCUDU gNB                  │     │
+│  │   srsUE      │◄─────────►│  OCUDU gNB                  │     │
 │  │  (lab_ue)    │           │  · ZMQ RF (no SDR hardware) │     │
 │  └──────────────┘           │  · E2 agent (KPM + RC)      │     │
 │                             └──────────┬──────────────────┘     │
@@ -77,7 +77,7 @@ It is designed as a foundation for:
 | Component | Role | Source |
 |---|---|---|
 | [OCUDU](https://gitlab.com/ocudu/ocudu) | 5G NR gNB with E2 agent | Built from source (ZMQ-enabled) |
-| [OCUDU 4G / UE](https://gitlab.com/ocudu/ocudu) | ZMQ UE simulator | Built from source |
+| [srsRAN 4G / srsUE](https://github.com/srsran/srsRAN_4G) | ZMQ UE simulator | Built from source |
 | [Open5GS](https://open5gs.org) | 5G Core (all NFs) | `gradiant/open5gs:2.2.0` |
 | [O-RAN SC RIC](https://github.com/srsran/oran-sc-ric) | Near-RT RIC (i-Release) | Docker Compose (OCUDU-maintained) |
 | [ETSI OpenOP](https://oop.etsi.org) | CAMARA API gateway + orchestrator | Cloned from `labs.etsi.org/rep/oop/code/` |
@@ -272,7 +272,7 @@ orca-framework/
 │   │   └── subscriber_db.csv       # Test UE credentials (IMSI/K/OPc)
 │   ├── ocudu/
 │   │   ├── gnb_zmq.yaml            # gNB — ZMQ RF + E2 agent config
-│   │   └── ue_zmq.conf             # OCUDU UE — ZMQ RF config
+│   │   └── ue_zmq.conf             # srsUE — ZMQ RF config
 │   ├── oop/
 │   │   ├── gateway.yaml
 │   │   └── orchestrator.yaml
@@ -295,7 +295,7 @@ orca-framework/
 │
 └── repos/                          # Populated by bootstrap.sh
     ├── ocudu/                      # gNB source
-    ├── ocudu-4g/                   # OCUDU UE source
+    ├── srsRAN_4G/                  # srsUE source (ZMQ UE simulator)
     ├── oran-sc-ric/                # Near-RT RIC (Docker Compose)
     └── openop/                     # ETSI OpenOP components
         ├── open-exposure-gateway/

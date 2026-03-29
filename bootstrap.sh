@@ -144,13 +144,22 @@ clone_repos() {
   local REPOS_DIR="${SCRIPT_DIR}/repos"
   mkdir -p "${REPOS_DIR}"
 
-  # OCUDU (gNB + UE — single repo provides both binaries)
+  # OCUDU (gNB with E2 agent)
   if [[ ! -d "${REPOS_DIR}/ocudu" ]]; then
-    info "  → Cloning OCUDU (gNB + UE)..."
+    info "  → Cloning OCUDU (gNB)..."
     git clone --depth 1 https://gitlab.com/ocudu/ocudu.git \
       "${REPOS_DIR}/ocudu"
   else
     warn "  OCUDU already cloned, skipping"
+  fi
+
+  # srsRAN 4G (srsUE — ZMQ UE simulator; not part of OCUDU)
+  if [[ ! -d "${REPOS_DIR}/srsRAN_4G" ]]; then
+    info "  → Cloning srsRAN 4G (srsUE)..."
+    git clone --depth 1 https://github.com/srsran/srsRAN_4G.git \
+      "${REPOS_DIR}/srsRAN_4G"
+  else
+    warn "  srsRAN 4G already cloned, skipping"
   fi
 
   # O-RAN SC RIC (Docker Compose — no Kubernetes needed)

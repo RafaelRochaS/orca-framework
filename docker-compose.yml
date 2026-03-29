@@ -139,11 +139,14 @@ services:
     # Note: The gNB will retry E2 connection — RIC startup lag is acceptable
 
   # =============================================================================
-  # 4. OCUDU UE — ZMQ-based UE simulator (optional, started via ./lab.sh ue)
-  #    Reuses the same image as the gNB — both binaries are in the OCUDU build.
+  # 4. srsUE — ZMQ-based UE simulator (optional, started via ./lab.sh ue)
+  #    Built from srsRAN_4G (srsUE is not part of the OCUDU project)
   # =============================================================================
-  ocudu-ue:
-    image: lab_ocudu_gnb:latest
+  srsue:
+    build:
+      context: ./repos/srsRAN_4G
+      dockerfile: ../../docker/srsue.Dockerfile
+    image: lab_srsue:latest
     container_name: lab_ue
     restart: "no"            # start manually via lab.sh ue
     privileged: true
@@ -154,10 +157,7 @@ services:
         ipv4_address: 10.53.2.40
     volumes:
       - ./config/ocudu/ue_zmq.conf:/config/ue.conf:ro
-    command: srsue /config/ue.conf
-    depends_on:
-      ocudu-gnb:
-        condition: service_started
+    command: ["/config/ue.conf"]
     profiles:
       - ue                   # only started when explicitly requested
 

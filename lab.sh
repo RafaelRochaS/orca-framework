@@ -40,11 +40,13 @@ usage() {
 # RIC must be up before gNB tries to connect via E2
 cmd_build() {
   echo ""
-  warn "The OCUDU image must be compiled from source with ZMQ support."
+  warn "The OCUDU gNB and srsUE images must be compiled from source with ZMQ support."
   warn "This takes 15-25 minutes on first run (subsequent builds use layer cache)."
   echo ""
-  info "Building OCUDU (gNB + UE, ZMQ-enabled)..."
+  info "Building OCUDU gNB (ZMQ-enabled)..."
   docker compose -f "${COMPOSE_FILE}" build ocudu-gnb
+  info "Building srsUE (ZMQ-enabled, from srsRAN_4G)..."
+  docker compose -f "${COMPOSE_FILE}" build srsue
   info "Building OOP Gateway (Open Exposure Gateway)..."
   docker compose -f "${COMPOSE_FILE}" build oop-gateway
   info "Building OOP Service Resource Manager..."
@@ -142,11 +144,11 @@ cmd_logs() {
 }
 
 cmd_ue() {
-  info "Launching OCUDU UE (ZMQ-based) and attaching to network..."
-  docker compose -f "${COMPOSE_FILE}" up -d ocudu-ue
+  info "Launching srsUE (ZMQ-based) and attaching to network..."
+  docker compose -f "${COMPOSE_FILE}" up -d srsue
   info "UE container started. Tailing UE logs (Ctrl+C to detach):"
   sleep 2
-  docker compose -f "${COMPOSE_FILE}" logs -f ocudu-ue
+  docker compose -f "${COMPOSE_FILE}" logs -f srsue
 }
 
 cmd_xapp() {

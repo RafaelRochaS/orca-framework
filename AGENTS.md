@@ -38,7 +38,8 @@ orca-framework/
 │       └── qod_xapp.py   # QoD xApp scaffold — A1 + KPM + RC control
 │
 └── repos/                # Cloned by bootstrap.sh — DO NOT edit files here
-    ├── ocudu/            # gNB + UE source (single build, both binaries)
+    ├── ocudu/            # OCUDU gNB source (built by lab.sh build)
+    ├── srsRAN_4G/        # srsUE source (ZMQ UE simulator)
     ├── oran-sc-ric/      # O-RAN SC RIC (has its own docker-compose.yml)
     └── openop/           # ETSI OpenOP repos (built by lab.sh build)
         ├── open-exposure-gateway/        # OEG — CAMARA northbound gateway
@@ -62,7 +63,7 @@ orca-framework/
 ./lab.sh restart     # down + up
 ./lab.sh status      # Table of container health and ports
 ./lab.sh logs [svc]  # Tail logs (omit service name for all)
-./lab.sh ue          # Start OCUDU UE and attach to network
+./lab.sh ue          # Start srsUE and attach to network
 ./lab.sh xapp        # Launch KPM monitoring xApp in RIC
 ./lab.sh clean       # Destroy all containers + volumes (destructive)
 ./lab.sh shell [svc] # Open bash in a running container
