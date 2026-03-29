@@ -1,6 +1,6 @@
 # =============================================================================
-# srsRAN Project — gNB Configuration (ZMQ RF, E2 agent enabled)
-# PLMN: 00101 | Band n3 (1800MHz) | ZMQ transport to srsUE
+# OCUDU — gNB Configuration (ZMQ RF, E2 agent enabled)
+# PLMN: 00101 | Band n3 (1800MHz) | ZMQ transport to OCUDU UE
 # =============================================================================
 
 gnb_id: 0x411

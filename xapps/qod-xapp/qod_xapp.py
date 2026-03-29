@@ -52,7 +52,7 @@ logger = logging.getLogger("qod-xapp")
 # Configuration
 # =============================================================================
 A1_POLICY_TYPE_ID = 20008          # Custom policy type for QoD
-E2SM_KPM_FUNC_ID = 2               # KPM function ID (as advertised by srsRAN gNB)
+E2SM_KPM_FUNC_ID = 2               # KPM function ID (as advertised by OCUDU gNB)
 E2SM_RC_FUNC_ID = 3                # RC function ID
 
 # Metrics to monitor for QoD SLA verification

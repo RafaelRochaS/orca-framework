@@ -3,3 +3,5 @@ repos/
 __pycache__/
 .env
 *.log
+
+PROJECT_CONTEXT.md

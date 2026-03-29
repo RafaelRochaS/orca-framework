@@ -4,7 +4,7 @@
 > CAMARA APIs over an O-RAN-enabled 5G network stack.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Stack: srsRAN + Open5GS + O-RAN SC RIC + ETSI OpenOP](https://img.shields.io/badge/stack-srsRAN%20%7C%20Open5GS%20%7C%20O--RAN%20SC%20RIC%20%7C%20ETSI%20OpenOP-informational)](#architecture)
+[![Stack: OCUDU + Open5GS + O-RAN SC RIC + ETSI OpenOP](https://img.shields.io/badge/stack-OCUDU%20%7C%20Open5GS%20%7C%20O--RAN%20SC%20RIC%20%7C%20ETSI%20OpenOP-informational)](#architecture)
 [![Target OS: Ubuntu 24.04 LTS](https://img.shields.io/badge/OS-Ubuntu%2024.04%20LTS-orange)](https://releases.ubuntu.com/24.04/)
 
 ---
@@ -37,7 +37,7 @@ It is designed as a foundation for:
 │                        Ubuntu 24.04 VM                          │
 │                                                                 │
 │  ┌──────────────┐  ZMQ RF   ┌─────────────────────────────┐    │
-│  │   srsUE      │◄─────────►│  srsRAN gNB                 │    │
+│  │   OCUDU UE   │◄─────────►│  OCUDU gNB                  │    │
 │  │  (lab_ue)    │           │  · ZMQ RF (no SDR hardware) │    │
 │  └──────────────┘           │  · E2 agent (KPM + RC)      │    │
 │                             └──────────┬────────────────────┘   │
@@ -76,10 +76,10 @@ It is designed as a foundation for:
 
 | Component | Role | Source |
 |---|---|---|
-| [srsRAN Project](https://github.com/srsran/srsRAN_Project) | 5G NR gNB with E2 agent | Built from source (ZMQ-enabled) |
-| [srsRAN 4G / srsUE](https://github.com/srsran/srsRAN_4G) | ZMQ UE simulator | Built from source |
+| [OCUDU](https://gitlab.com/ocudu/ocudu) | 5G NR gNB with E2 agent | Built from source (ZMQ-enabled) |
+| [OCUDU 4G / UE](https://gitlab.com/ocudu/ocudu) | ZMQ UE simulator | Built from source |
 | [Open5GS](https://open5gs.org) | 5G Core (all NFs) | `gradiant/open5gs:2.2.0` |
-| [O-RAN SC RIC](https://github.com/srsran/oran-sc-ric) | Near-RT RIC (i-Release) | Docker Compose (srsRAN-maintained) |
+| [O-RAN SC RIC](https://github.com/srsran/oran-sc-ric) | Near-RT RIC (i-Release) | Docker Compose (OCUDU-maintained) |
 | [ETSI OpenOP](https://oop.etsi.org) | CAMARA API gateway + orchestrator | Cloned from `labs.etsi.org/rep/oop/code/` |
 | MongoDB | Subscriber database | `mongo:6.0` |
 | Grafana | Observability | `grafana/grafana:10.4.0` |
@@ -95,7 +95,7 @@ It is designed as a foundation for:
 
 Tested on: **Ubuntu 24.04 LTS** — AWS `t3.2xlarge` / GCP `n2-standard-8` or larger.
 
-> **Note on the RIC:** ORCA uses the [srsRAN-maintained `oran-sc-ric`](https://github.com/srsran/oran-sc-ric)
+> **Note on the RIC:** ORCA uses the [OCUDU-maintained `oran-sc-ric`](https://github.com/srsran/oran-sc-ric)
 > which runs the O-RAN SC Near-RT RIC as a pure Docker Compose stack — no
 > Kubernetes or Helm required. If you encounter RMR issues with this image,
 > see [Troubleshooting](#troubleshooting) for the fallback options.
@@ -121,7 +121,7 @@ Log out and back in (or run `newgrp docker`) to apply Docker group membership.
 ./lab.sh build
 ```
 
-This compiles the srsRAN gNB with ZMQ and E2 support enabled, and builds
+This compiles the OCUDU gNB with ZMQ and E2 support enabled, and builds
 the ORCA OOP gateway and orchestrator. **Expect 15–25 minutes on first run**;
 subsequent builds use the Docker layer cache.
 
@@ -136,7 +136,7 @@ Services start in dependency order:
 1. MongoDB + Open5GS 5G Core (waits for AMF healthcheck)
 2. O-RAN SC Near-RT RIC
 3. ETSI OpenOP CAMARA layer (gateway + orchestrator)
-4. srsRAN gNB (connects to both 5GC via N2 and RIC via E2)
+4. OCUDU gNB (connects to both 5GC via N2 and RIC via E2)
 
 ### 4. Attach a simulated UE
 
@@ -149,7 +149,7 @@ Services start in dependency order:
 ```bash
 ./lab.sh status
 ./lab.sh logs open5gs
-./lab.sh logs srsran-gnb
+./lab.sh logs ocudu-gnb
 ```
 
 ---
@@ -270,9 +270,9 @@ orca-framework/
 │   ├── open5gs/
 │   │   ├── open5gs.yaml            # 5G Core configuration
 │   │   └── subscriber_db.csv       # Test UE credentials (IMSI/K/OPc)
-│   ├── srsran/
+│   ├── ocudu/
 │   │   ├── gnb_zmq.yaml            # gNB — ZMQ RF + E2 agent config
-│   │   └── ue_zmq.conf             # srsUE — ZMQ RF config
+│   │   └── ue_zmq.conf             # OCUDU UE — ZMQ RF config
 │   ├── oop/
 │   │   ├── gateway.yaml
 │   │   └── orchestrator.yaml
@@ -294,8 +294,8 @@ orca-framework/
 │       └── qod_xapp.py             # QoD xApp scaffold (KPM + RC)
 │
 └── repos/                          # Populated by bootstrap.sh
-    ├── srsRAN_Project/             # gNB source
-    ├── srsRAN_4G/                  # srsUE source
+    ├── ocudu/                      # gNB source
+    ├── ocudu-4g/                   # OCUDU UE source
     ├── oran-sc-ric/                # Near-RT RIC (Docker Compose)
     └── openop/                     # ETSI OpenOP components
         ├── open-exposure-gateway/
@@ -315,7 +315,7 @@ Kubernetes cluster. The service boundaries map directly to k8s Deployments
 if migration to a multi-node setup is needed later.
 
 **Why `gradiant/open5gs` and not a custom 5GC build?**
-The Gradiant image is validated in official srsRAN integration testing,
+The Gradiant image is validated in official OCUDU integration testing,
 reducing integration risk. For research focused on the RAN and CAMARA layer,
 a stable pre-built 5GC is the right tradeoff. Custom 5GC builds can be
 swapped in by changing the `image:` reference and config mounts.
@@ -332,7 +332,7 @@ community.
 
 **gNB fails to connect to AMF:**
 ```bash
-./lab.sh logs srsran-gnb    # Look for "NG setup procedure failed"
+./lab.sh logs ocudu-gnb    # Look for "NG setup procedure failed"
 ./lab.sh logs open5gs       # Check for SCTP connection errors
 ```
 Verify `AMF_ADDR` in `docker-compose.yml` matches the Open5GS container IP
@@ -363,7 +363,7 @@ the full O-RAN SC RIC deployed via `ric-dep` on a `kind` cluster.
 
 **UE fails to register:**
 Verify the IMSI, K, and OPc in `config/open5gs/subscriber_db.csv` exactly
-match `config/srsran/ue_zmq.conf`.
+match `config/ocudu/ue_zmq.conf`.
 
 **OOP Gateway returns 500:**
 ```bash
@@ -395,7 +395,7 @@ Please open an issue before submitting a large PR to align on design direction.
 - [CAMARA Project](https://camaraproject.org) — GSMA/LF open API definitions
 - [ETSI OpenOP / SDG OOP](https://oop.etsi.org) — Open Operator Platform
 - [O-RAN Software Community](https://o-ran-sc.org) — Near-RT RIC and xApp runtime
-- [srsRAN Project](https://www.srsran.com) — Open-source 5G NR RAN
+- [OCUDU Project](https://ocudu.org) — Open-source 5G NR RAN
 - [Open5GS](https://open5gs.org) — Open-source 5G Core
 - [SUNRISE-6G](https://sunrise6g.eu) — EU 6G testbed federation project
 
@@ -403,5 +403,5 @@ Please open an issue before submitting a large PR to align on design direction.
 
 ## License
 
-Apache License 2.0 — consistent with ETSI OpenOP, srsRAN, CAMARA Project,
+Apache License 2.0 — consistent with ETSI OpenOP, OCUDU, CAMARA Project,
 and O-RAN SC licensing. See [LICENSE](LICENSE) for details.

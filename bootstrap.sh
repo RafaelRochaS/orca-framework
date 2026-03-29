@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # 5G Research Lab Bootstrap Script
-# Ubuntu 24.04 LTS | srsRAN + Open5GS + O-RAN SC RIC + ETSI OpenOP
+# Ubuntu 24.04 LTS | OCUDU + Open5GS + O-RAN SC RIC + ETSI OpenOP
 # =============================================================================
 set -euo pipefail
 
@@ -89,7 +89,7 @@ tune_kernel() {
   sudo sysctl -w net.ipv4.ip_forward=1
   echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-5glab.conf > /dev/null
 
-  # ZMQ / srsRAN tuning
+  # ZMQ / OCUDU tuning
   sudo sysctl -w net.core.rmem_max=134217728
   sudo sysctl -w net.core.wmem_max=134217728
   cat <<EOF | sudo tee -a /etc/sysctl.d/99-5glab.conf
@@ -144,22 +144,22 @@ clone_repos() {
   local REPOS_DIR="${SCRIPT_DIR}/repos"
   mkdir -p "${REPOS_DIR}"
 
-  # srsRAN Project (gNB with E2 agent)
-  if [[ ! -d "${REPOS_DIR}/srsRAN_Project" ]]; then
-    info "  → Cloning srsRAN Project (gNB)..."
-    git clone --depth 1 https://github.com/srsran/srsRAN_Project.git \
-      "${REPOS_DIR}/srsRAN_Project"
+  # OCUDU (gNB with E2 agent)
+  if [[ ! -d "${REPOS_DIR}/ocudu" ]]; then
+    info "  → Cloning OCUDU (gNB)..."
+    git clone --depth 1 https://gitlab.com/ocudu/ocudu.git \
+      "${REPOS_DIR}/ocudu"
   else
-    warn "  srsRAN Project already cloned, skipping"
+    warn "  OCUDU already cloned, skipping"
   fi
 
-  # srsRAN 4G (for srsUE — ZMQ UE simulator)
-  if [[ ! -d "${REPOS_DIR}/srsRAN_4G" ]]; then
-    info "  → Cloning srsRAN 4G (srsUE)..."
-    git clone --depth 1 https://github.com/srsran/srsRAN_4G.git \
-      "${REPOS_DIR}/srsRAN_4G"
+  # OCUDU 4G (for UE — ZMQ UE simulator)
+  if [[ ! -d "${REPOS_DIR}/ocudu-4g" ]]; then
+    info "  → Cloning OCUDU 4G (UE)..."
+    git clone --depth 1 https://gitlab.com/ocudu/ocudu.git \
+      "${REPOS_DIR}/ocudu-4g"
   else
-    warn "  srsRAN 4G already cloned, skipping"
+    warn "  OCUDU 4G already cloned, skipping"
   fi
 
   # O-RAN SC RIC (Docker Compose — no Kubernetes needed)
@@ -261,7 +261,7 @@ main() {
   echo -e "${CYAN}"
   echo "  ╔══════════════════════════════════════════════╗"
   echo "  ║   5G Research Lab — Bootstrap                ║"
-  echo "  ║   srsRAN · Open5GS · O-RAN RIC · ETSI OOP  ║"
+  echo "  ║   OCUDU · Open5GS · O-RAN RIC · ETSI OOP   ║"
   echo "  ╚══════════════════════════════════════════════╝"
   echo -e "${NC}"
 

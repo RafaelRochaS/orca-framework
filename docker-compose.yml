@@ -1,6 +1,6 @@
 # =============================================================================
 # 5G Research Lab — Docker Compose
-# Components: Open5GS 5GC · srsRAN gNB/UE (ZMQ) · ETSI OpenOP (CAMARA)
+# Components: Open5GS 5GC · OCUDU gNB/UE (ZMQ) · ETSI OpenOP (CAMARA)
 #
 # O-RAN SC Near-RT RIC runs via its own docker-compose.yml in repos/oran-sc-ric/
 # and communicates with the gNB over the shared "ran" network.
@@ -59,9 +59,9 @@ services:
   # =============================================================================
   # 2. OPEN5GS — 5G Core Network Functions
   #    Uses the Gradiant Open5GS image, which is the same one used in the official
-  #    srsRAN k8s tutorials. Bundles all NFs in a single container.
+  #    OCUDU k8s tutorials. Bundles all NFs in a single container.
   #    WebUI default credentials: admin / 1423
-  #    Note: The srsRAN docker-compose uses AMF IP 10.53.1.2 by convention —
+  #    Note: The OCUDU docker-compose uses AMF IP 10.53.1.2 by convention —
   #    we honour that here so configs/gnb_zmq.yaml stays consistent.
   # =============================================================================
   open5gs:
@@ -73,7 +73,7 @@ services:
       - NET_ADMIN
     networks:
       core:
-        ipv4_address: 10.53.1.2     # matches srsRAN's own docker-compose convention
+        ipv4_address: 10.53.1.2     # matches OCUDU's own docker-compose convention
       ran:
         ipv4_address: 10.53.2.20    # gNB N2/N3 connectivity
       oop:
@@ -103,11 +103,11 @@ services:
       start_period: 15s
 
   # =============================================================================
-  # 3. srsRAN gNB — NG-RAN base station (ZMQ RF, E2 agent for RIC)
+  # 3. OCUDU gNB — NG-RAN base station (ZMQ RF, E2 agent for RIC)
   # =============================================================================
-  srsran-gnb:
+  ocudu-gnb:
     build:
-      context: ./repos/srsRAN_Project
+      context: ./repos/ocudu
       dockerfile: docker/Dockerfile
       args:
         # CRITICAL: ZMQ support must be enabled at compile time.
@@ -115,7 +115,7 @@ services:
         # and will fail with "Factory for radio type zmq not found".
         EXTRA_CMAKE_ARGS: "-DENABLE_EXPORT=ON -DENABLE_ZEROMQ=ON"
         OS_VERSION: "24.04"
-    image: lab_srsran_gnb:latest
+    image: lab_ocudu_gnb:latest
     container_name: lab_gnb
     restart: unless-stopped
     privileged: true
@@ -128,7 +128,7 @@ services:
       ran:
         ipv4_address: 10.53.2.30
     volumes:
-      - ./config/srsran/gnb_zmq.yaml:/config/gnb.yaml:ro
+      - ./config/ocudu/gnb_zmq.yaml:/config/gnb.yaml:ro
     environment:
       AMF_ADDR: "10.53.1.2"         # Open5GS AMF — matches gradiant/open5gs convention
       RIC_ADDR: "10.53.2.100"       # O-RAN SC RIC E2 termination
@@ -139,15 +139,15 @@ services:
     # Note: The gNB will retry E2 connection — RIC startup lag is acceptable
 
   # =============================================================================
-  # 4. srsUE — ZMQ-based UE simulator (optional, started via ./lab.sh ue)
+  # 4. OCUDU UE — ZMQ-based UE simulator (optional, started via ./lab.sh ue)
   # =============================================================================
-  srsran-ue:
+  ocudu-ue:
     build:
-      context: ./repos/srsRAN_4G
+      context: ./repos/ocudu-4g
       dockerfile: docker/Dockerfile
       args:
         OS_VERSION: "24.04"
-    image: lab_srsran_ue:latest
+    image: lab_ocudu_ue:latest
     container_name: lab_ue
     restart: "no"            # start manually via lab.sh ue
     privileged: true
@@ -157,7 +157,7 @@ services:
       ran:
         ipv4_address: 10.53.2.40
     volumes:
-      - ./config/srsran/ue_zmq.conf:/config/ue.conf:ro
+      - ./config/ocudu/ue_zmq.conf:/config/ue.conf:ro
     command: >
       srsue /config/ue.conf
     profiles:

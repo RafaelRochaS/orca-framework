@@ -40,13 +40,13 @@ usage() {
 # RIC must be up before gNB tries to connect via E2
 cmd_build() {
   echo ""
-  warn "The srsRAN gNB image must be compiled from source with ZMQ support."
+  warn "The OCUDU gNB image must be compiled from source with ZMQ support."
   warn "This takes 15-25 minutes on first run (subsequent builds use layer cache)."
   echo ""
-  info "Building srsRAN gNB (ZMQ-enabled)..."
-  docker compose -f "${COMPOSE_FILE}" build srsran-gnb
-  info "Building srsUE..."
-  docker compose -f "${COMPOSE_FILE}" build srsran-ue
+  info "Building OCUDU gNB (ZMQ-enabled)..."
+  docker compose -f "${COMPOSE_FILE}" build ocudu-gnb
+  info "Building OCUDU UE..."
+  docker compose -f "${COMPOSE_FILE}" build ocudu-ue
   info "Building OOP Gateway + Orchestrator..."
   docker compose -f "${COMPOSE_FILE}" build oop-gateway oop-orchestrator
   success "All images built. Run ./lab.sh up to start the lab."
@@ -57,8 +57,8 @@ cmd_up() {
   echo ""
 
   # Pre-flight: check if gNB image exists — it needs a source build first
-  if ! docker image inspect lab_srsran_gnb:latest &>/dev/null; then
-    warn "srsRAN gNB image not found — a source build is required."
+  if ! docker image inspect lab_ocudu_gnb:latest &>/dev/null; then
+    warn "OCUDU gNB image not found — a source build is required."
     warn "This will take 15-25 minutes on first run."
     read -rp "Build now? (yes/no): " confirm
     if [[ "${confirm}" == "yes" ]]; then
@@ -92,11 +92,11 @@ cmd_up() {
   _wait_healthy "oop-gateway" 60
   success "  OpenOP services are up"
 
-  # Step 4: srsRAN gNB (connects to both 5GC and RIC)
-  info "Step 4/4 — Starting srsRAN gNB (ZMQ)..."
-  docker compose -f "${COMPOSE_FILE}" up -d srsran-gnb
+  # Step 4: OCUDU gNB (connects to both 5GC and RIC)
+  info "Step 4/4 — Starting OCUDU gNB (ZMQ)..."
+  docker compose -f "${COMPOSE_FILE}" up -d ocudu-gnb
   sleep 5
-  success "  srsRAN gNB started"
+  success "  OCUDU gNB started"
 
   echo ""
   cmd_status
@@ -142,11 +142,11 @@ cmd_logs() {
 }
 
 cmd_ue() {
-  info "Launching srsUE (ZMQ-based) and attaching to network..."
-  docker compose -f "${COMPOSE_FILE}" up -d srsran-ue
+  info "Launching OCUDU UE (ZMQ-based) and attaching to network..."
+  docker compose -f "${COMPOSE_FILE}" up -d ocudu-ue
   info "UE container started. Tailing UE logs (Ctrl+C to detach):"
   sleep 2
-  docker compose -f "${COMPOSE_FILE}" logs -f srsran-ue
+  docker compose -f "${COMPOSE_FILE}" logs -f ocudu-ue
 }
 
 cmd_xapp() {
