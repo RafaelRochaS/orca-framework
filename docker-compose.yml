@@ -164,11 +164,13 @@ services:
       - ue                   # only started when explicitly requested
 
   # =============================================================================
-  # 5. ETSI OpenOP — CAMARA API Gateway (northbound exposure)
+  # 5. ETSI OpenOP — Open Exposure Gateway (northbound CAMARA API exposure)
+  #    Built from the upstream repo: labs.etsi.org/rep/oop/code/open-exposure-gateway
+  #    Connexion/Flask app on port 8080 — Swagger UI at /docs/
   # =============================================================================
   oop-gateway:
     build:
-      context: ./oop/gateway
+      context: ./repos/openop/open-exposure-gateway
       dockerfile: Dockerfile
     image: lab_oop_gateway:latest
     container_name: lab_oop_gateway
@@ -179,20 +181,20 @@ services:
       core:
         ipv4_address: 10.53.1.30
     ports:
-      - "8080:8080"           # CAMARA API northbound (HTTP/HTTPS)
-      - "8443:8443"           # CAMARA API TLS
-    volumes:
-      - ./config/oop/gateway.yaml:/app/config/gateway.yaml:ro
-      - ./oop/gateway/api-specs:/app/api-specs:ro
+      - "8080:8080"           # CAMARA API northbound (HTTP)
     environment:
-      ORCHESTRATOR_URL: "http://10.53.3.40:8090"
-      OPEN5GS_NEF_URL: "http://10.53.3.20:7777"  # Open5GS NEF
-      LOG_LEVEL: "INFO"
+      MONGO_URI: "mongodb://10.53.1.10:27017"           # shared MongoDB instance
+      SRM_HOST: "http://10.53.3.40:8090/srm/1.0.0"     # OOP Orchestrator (SRM role)
+      FEDERATION_MANAGER_HOST: ""                        # not used in lab
+      TOKEN_ENDPOINT: ""                                 # not used in lab
+      PARTNER_API_ROOT: ""                               # not used in lab
     depends_on:
+      mongodb:
+        condition: service_healthy
       open5gs:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/docs/"]
       interval: 10s
       timeout: 5s
       retries: 6
