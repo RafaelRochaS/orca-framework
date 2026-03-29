@@ -66,6 +66,7 @@ services:
   # =============================================================================
   open5gs:
     image: gradiant/open5gs:2.2.0
+    platform: linux/amd64
     container_name: lab_open5gs
     restart: unless-stopped
     privileged: true          # required for TUN device (UPF)
