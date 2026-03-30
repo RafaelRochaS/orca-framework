@@ -68,6 +68,7 @@ services:
     image: gradiant/open5gs:2.7.6
     platform: linux/amd64
     container_name: lab_open5gs
+    user: root
     restart: unless-stopped
     privileged: true          # required for TUN device (UPF)
     cap_add:
@@ -97,7 +98,7 @@ services:
       mongodb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 38412 || exit 1"]
+      test: ["CMD-SHELL", "ss -lnp 2>/dev/null | grep 38412 || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 20

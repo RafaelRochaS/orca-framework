@@ -16,11 +16,15 @@ if ! grep -q "ogstun" /proc/net/dev 2>/dev/null; then
     ip tuntap add name ogstun mode tun
     ip link set ogstun up
 fi
+
 ip addr del "${IPV4_TUN_ADDR:-10.45.0.1/16}" dev ogstun 2>/dev/null || true
 ip addr add "${IPV4_TUN_ADDR:-10.45.0.1/16}" dev ogstun
 ip link set ogstun up
 echo 1 > /proc/sys/net/ipv4/ip_forward
 iptables -t nat -A POSTROUTING -s "${IPV4_TUN_SUBNET:-10.45.0.0/16}" ! -o ogstun -j MASQUERADE
+
+# ── Fix FreeDiameter resolution for 5G SA only ───────────────────────────────
+echo "127.0.0.1 pcrf" >> /etc/hosts
 
 # ── Start NFs in dependency order ────────────────────────────────────────────
 # NRF must be first — all other NFs register with it.
@@ -41,7 +45,7 @@ NFS=(
 PIDS=()
 for nf in "${NFS[@]}"; do
     echo "[open5gs] Starting ${nf}..."
-    ${nf} &
+    ${nf} -c /opt/open5gs/etc/open5gs/open5gs.yaml &
     PIDS+=($!)
     # Small stagger so NRF is discoverable before dependents register
     sleep 0.5

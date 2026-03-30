@@ -26,6 +26,18 @@ nrf:
         port: 7777
 
 # =============================================================================
+# Service Communication Proxy (SCP)
+# =============================================================================
+scp:
+  sbi:
+    server:
+      - address: 127.0.0.200
+        port: 7777
+    client:
+      nrf:
+        - uri: http://127.0.0.10:7777
+
+# =============================================================================
 # Access and Mobility Management Function (AMF)
 # =============================================================================
 amf:
@@ -37,9 +49,13 @@ amf:
       nrf:
         - uri: http://127.0.0.10:7777
 
+  time:
+    t3512:
+      value: 540
+
   ngap:
     server:
-      - address: ${AMF_IP:-10.53.1.2}   # gNB connects here (N2/NGAP over SCTP)
+      - address: 10.53.1.2   # gNB connects here (N2/NGAP over SCTP)
 
   metrics:
     server:
