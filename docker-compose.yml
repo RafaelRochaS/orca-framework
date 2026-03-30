@@ -72,6 +72,8 @@ services:
     privileged: true          # required for TUN device (UPF)
     cap_add:
       - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     networks:
       core:
         ipv4_address: 10.53.1.2     # matches OCUDU's own docker-compose convention

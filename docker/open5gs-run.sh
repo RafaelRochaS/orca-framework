@@ -14,6 +14,7 @@ fi
 
 if ! grep -q "ogstun" /proc/net/dev 2>/dev/null; then
     ip tuntap add name ogstun mode tun
+    ip link set ogstun up
 fi
 ip addr del "${IPV4_TUN_ADDR:-10.45.0.1/16}" dev ogstun 2>/dev/null || true
 ip addr add "${IPV4_TUN_ADDR:-10.45.0.1/16}" dev ogstun
