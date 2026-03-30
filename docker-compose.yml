@@ -110,7 +110,7 @@ services:
   ocudu-gnb:
     build:
       context: ./repos/ocudu
-      dockerfile: docker/Dockerfile
+      dockerfile: ../../docker/ocudu-patched.Dockerfile
       args:
         # CRITICAL: ZMQ support must be enabled at compile time.
         # Without this the binary will only list "uhd" as available radio type
@@ -179,15 +179,16 @@ services:
       oop:
         ipv4_address: 10.53.3.30
       core:
-        ipv4_address: 10.53.1.30
+        ipv4_address: 10.53.1.31
     ports:
       - "8080:8080"           # CAMARA API northbound (HTTP)
     environment:
       MONGO_URI: "mongodb://10.53.1.10:27017"           # shared MongoDB instance
+      FEDERATION_MANAGER_HOST: "http://dummy"
+      TOKEN_ENDPOINT: "http://dummy"
+      PARTNER_API_ROOT: "http://dummy"
+      AVAIL_ZONE_NOTIF_LINK: "http://dummy"
       SRM_HOST: "http://10.53.3.40:8090/srm/1.0.0"     # OOP Orchestrator (SRM role)
-      FEDERATION_MANAGER_HOST: ""                        # not used in lab
-      TOKEN_ENDPOINT: ""                                 # not used in lab
-      PARTNER_API_ROOT: ""                               # not used in lab
     depends_on:
       mongodb:
         condition: service_healthy
@@ -224,8 +225,9 @@ services:
     environment:
       NETWORK_ADAPTER_NAME: "open5gs"
       NETWORK_ADAPTER_BASE_URL: "http://10.53.3.20:7777"    # Open5GS NEF
-      EDGE_CLOUD_ADAPTER_NAME: ""                            # not used in lab
-      ADAPTER_BASE_URL: ""                                   # not used in lab
+      EDGE_CLOUD_ADAPTER_NAME: "aeros"
+      KUBERNETES_MASTER_TOKEN: "dummy"                  # Dummy to satisfy initialization
+      ADAPTER_BASE_URL: "http://127.0.0.1:6443"              # Dummy
       PLATFORM_PROVIDER: "ORCA"
       ARTIFACT_MANAGER_ADDRESS: ""                           # not used in lab
     depends_on:
