@@ -149,6 +149,8 @@ services:
       context: ./repos/srsRAN_4G
       dockerfile: ../../docker/srsue.Dockerfile
     image: lab_srsue:latest
+    tty: true
+    stdin_open: true
     container_name: lab_ue
     restart: "no"            # start manually via lab.sh ue
     privileged: true

@@ -14,6 +14,7 @@ error()   { echo -e "${RED}[LAB]${NC}   $*"; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 RIC_DIR="${SCRIPT_DIR}/repos/oran-sc-ric"
+SUBSCRIBER_CSV="${SCRIPT_DIR}/config/open5gs/subscriber_db.csv"
 
 usage() {
   echo ""
@@ -75,6 +76,7 @@ cmd_up() {
   docker compose -f "${COMPOSE_FILE}" up -d mongodb open5gs
   info "  Waiting for AMF to become healthy..."
   _wait_healthy "open5gs" 90
+  _provision_subscribers
   success "  Open5GS 5GC is up"
 
   # Step 2: O-RAN SC Near-RT RIC
@@ -144,11 +146,100 @@ cmd_logs() {
 }
 
 cmd_ue() {
+  _provision_subscribers
   info "Launching srsUE (ZMQ-based) and attaching to network..."
   docker compose -f "${COMPOSE_FILE}" up -d srsue
   info "UE container started. Tailing UE logs (Ctrl+C to detach):"
   sleep 2
   docker compose -f "${COMPOSE_FILE}" logs -f srsue
+}
+
+_provision_subscribers() {
+  if [[ ! -f "${SUBSCRIBER_CSV}" ]]; then
+    warn "Subscriber CSV not found at ${SUBSCRIBER_CSV}"
+    return
+  fi
+
+  local imsi k opc amf sqn sst sd apn ip
+  local provisioned=0
+  while IFS=',' read -r imsi k opc amf sqn sst sd apn ip _; do
+    # Skip comments and empty lines.
+    imsi="${imsi//[[:space:]]/}"
+    [[ -z "${imsi}" || "${imsi:0:1}" == "#" ]] && continue
+
+    k="${k//[[:space:]]/}"
+    opc="${opc//[[:space:]]/}"
+    amf="${amf//[[:space:]]/}"
+    apn="${apn//[[:space:]]/}"
+    ip="${ip//[[:space:]]/}"
+
+    if [[ -z "${k}" || -z "${opc}" ]]; then
+      warn "Skipping subscriber ${imsi}: missing K or OPc"
+      continue
+    fi
+
+    amf="${amf:-8000}"
+    apn="${apn:-internet}"
+
+    docker compose -f "${COMPOSE_FILE}" exec -T \
+      -e IMSI="${imsi}" \
+      -e KI="${k}" \
+      -e OPC="${opc}" \
+      -e AMF="${amf}" \
+      -e APN="${apn}" \
+      -e UE_IPV4="${ip}" \
+      mongodb mongosh 'mongodb://localhost/open5gs' --quiet --eval '
+        const imsi = process.env.IMSI;
+        const apn = process.env.APN || "internet";
+        const doc = {
+          schema_version: NumberInt(1),
+          imsi: imsi,
+          msisdn: [], imeisv: [], mme_host: [], mm_realm: [], purge_flag: [],
+          slice: [{
+            sst: NumberInt(1),
+            default_indicator: true,
+            session: [{
+              name: apn,
+              type: NumberInt(3),
+              qos: { index: NumberInt(9), arp: { priority_level: NumberInt(8), pre_emption_capability: NumberInt(1), pre_emption_vulnerability: NumberInt(2) } },
+              ambr: {
+                downlink: { value: NumberInt(1000000000), unit: NumberInt(0) },
+                uplink: { value: NumberInt(1000000000), unit: NumberInt(0) }
+              },
+              pcc_rule: []
+            }]
+          }],
+          security: {
+            k: process.env.KI,
+            op: null,
+            opc: process.env.OPC,
+            amf: process.env.AMF || "8000"
+          },
+          ambr: {
+            downlink: { value: NumberInt(1000000000), unit: NumberInt(0) },
+            uplink: { value: NumberInt(1000000000), unit: NumberInt(0) }
+          },
+          access_restriction_data: 32,
+          network_access_mode: 0,
+          subscriber_status: 0,
+          operator_determined_barring: 0,
+          subscribed_rau_tau_timer: 12,
+          __v: 0
+        };
+        if (process.env.UE_IPV4) {
+          doc.slice[0].session[0].ue = { ipv4: process.env.UE_IPV4 };
+        }
+        db.subscribers.updateOne({ imsi: imsi }, { $set: doc }, { upsert: true });
+      ' >/dev/null
+
+    provisioned=$((provisioned + 1))
+  done < "${SUBSCRIBER_CSV}"
+
+  if (( provisioned == 0 )); then
+    warn "No valid subscriber rows found in ${SUBSCRIBER_CSV}"
+  else
+    success "  Provisioned ${provisioned} subscriber(s) from CSV"
+  fi
 }
 
 cmd_xapp() {

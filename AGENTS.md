@@ -195,7 +195,7 @@ If you see "Factory for radio type zmq not found", rebuild with `./lab.sh build`
 - **Never change fixed container IPs** without updating every config that
   references them.
 - **Never add `privileged: true`** to new containers without a documented reason.
-  Currently only `lab_open5gs` needs it (UPF TUN device).
+  Currently only `lab_open5gs` (UPF TUN device) and `srsue` need it.
 - **Never commit real credentials** — subscriber DB contains test-only values.
 - **Never rename the `lab_ran` network** — referenced externally by oran-sc-ric.
 
