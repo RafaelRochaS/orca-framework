@@ -21,7 +21,7 @@ RUN cmake -GNinja \
     -DENABLE_SRSENB=OFF \
     -DENABLE_SRSEPC=OFF \
     .. && \
-    ninja srsue
+    ninja srsue srsran_rf_zmq
 
 # --- Runtime stage ---
 FROM ubuntu:22.04
@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/build/srsue/src/srsue /usr/local/bin/srsue
-COPY --from=builder /src/build/lib/src/phy/rf/libsrsran_rf.so* /usr/local/lib/
+COPY --from=builder /src/build/lib/src/phy/rf/libsrsran_rf*.so* /usr/local/lib/
 RUN ldconfig
 
 ENTRYPOINT ["srsue"]

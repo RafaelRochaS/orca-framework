@@ -5,3 +5,5 @@ __pycache__/
 *.log
 
 PROJECT_CONTEXT.md
+
+.vscode/

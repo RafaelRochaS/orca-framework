@@ -2,6 +2,7 @@
   "chat.tools.terminal.autoApprove": {
     "docker": true,
     "grep": true,
-    "./lab.sh": true
+    "./lab.sh": true,
+    "true": true
   }
 }
