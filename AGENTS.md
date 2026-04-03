@@ -58,13 +58,13 @@ orca-framework/
 ./lab.sh build
 
 # Lab lifecycle
-./lab.sh up          # Start everything in correct dependency order
+./lab.sh up          # Start everything + auto-wire RIC E2 + auto-launch KPM xApp
 ./lab.sh down        # Stop everything
 ./lab.sh restart     # down + up
 ./lab.sh status      # Table of container health and ports
 ./lab.sh logs [svc]  # Tail logs (omit service name for all)
 ./lab.sh ue          # Start srsUE and attach to network
-./lab.sh xapp        # Launch KPM monitoring xApp in RIC
+./lab.sh xapp        # Launch/relaunch KPM xApp for the currently registered gNB node
 ./lab.sh clean       # Destroy all containers + volumes (destructive)
 ./lab.sh shell [svc] # Open bash in a running container
 
@@ -76,6 +76,7 @@ cd repos/oran-sc-ric
 docker compose up -d
 docker compose logs -f e2term
 docker compose exec python_xapp_runner python3 ./kpm_mon_xapp.py
+docker exec ric_dbaas redis-cli --raw KEYS '{e2Manager},RAN:*'
 ```
 
 ---
@@ -152,7 +153,11 @@ Default test UE:
 - Algorithm: Milenage
 
 Values must match `config/ocudu/ue_zmq.conf` exactly (case-insensitive hex).
-After editing the CSV, restart `lab_open5gs`.
+`lab.sh` treats this CSV as the source of truth and upserts subscribers into
+MongoDB during `./lab.sh up` and again before `./lab.sh ue`.
+
+After editing the CSV, run `./lab.sh up` (or `./lab.sh ue`) so provisioning is
+re-applied. Restarting only `lab_open5gs` does not re-run CSV import logic.
 
 ---
 
@@ -173,6 +178,30 @@ If broken, the fallback is the full O-RAN SC RIC via `ric-dep` on a `kind`
 cluster. Update this section when the issue is resolved or the fallback
 is implemented.
 
+### gNB↔RIC E2 reachability in Compose mode (status: RESOLVED)
+The RIC `e2term` container starts on `oran-sc-ric_ric_network` (`10.0.2.0/24`).
+The lab gNB reaches RIC E2 via `lab_ran` at `10.53.2.100`, so `e2term` must also
+be attached to `lab_ran`.
+
+Current behavior:
+- `lab.sh up` auto-attaches `ric_e2term` to `lab_ran` with IP `10.53.2.100`
+- `lab.sh up` waits for SCTP association (`10.53.2.30` peer) before xApp launch
+
+Quick check:
+```bash
+docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{$v.IPAddress}} {{end}}' ric_e2term
+docker exec ric_e2term cat /proc/net/sctp/assocs
+```
+
+### xApp subscription to wrong ranName (status: RESOLVED)
+SubMgr 503 responses such as `No E2 connection for ranName gnbd_...` were caused
+by stale/hardcoded RAN node IDs.
+
+Current behavior:
+- RAN node is resolved dynamically from dbaas key pattern `{e2Manager},RAN:*`
+- `lab.sh up` and `lab.sh xapp` launch KPM xApp with the resolved `--e2_node_id`
+- Subscription is validated against `{submgr_e2SubsDb},*` for the same `RanName`
+
 ### ETSI OpenOP repos (status: ACTIVE)
 The CAMARA layer uses the upstream ETSI OpenOP repos cloned into `repos/openop/`:
 - `open-exposure-gateway` — OEG, CAMARA northbound (Edge Cloud LCM + QoD)
@@ -186,6 +215,25 @@ Must be built with `-DENABLE_EXPORT=ON -DENABLE_ZEROMQ=ON`.
 This is set in `docker-compose.yml` under `ocudu-gnb.build.args.EXTRA_CMAKE_ARGS`.
 If you see "Factory for radio type zmq not found", rebuild with `./lab.sh build`.
 
+### UE registration rejected after successful RRC (status: RESOLVED)
+If UE reaches RACH/RRC/InitialUEMessage but Open5GS rejects registration, check
+subscriber provisioning before tuning RF.
+
+Typical signature:
+- gNB logs show `InitialUEMessage` and `rrcSetupComplete`
+- AMF logs show `Cannot find IMSI in DB` or `Registration reject [7]`
+
+Quick check:
+```bash
+docker compose exec mongodb mongosh 'mongodb://localhost/open5gs' --quiet \
+  --eval 'db.subscribers.find({}, {imsi:1,_id:0}).pretty()'
+```
+
+Expected success path after fix:
+- AMF logs `Registration complete` for `imsi-...`
+- UE logs `Handling Registration Accept`
+- UE logs `PDU Session Establishment successful. IP: ...`
+
 ---
 
 ## Hard rules
@@ -198,6 +246,7 @@ If you see "Factory for radio type zmq not found", rebuild with `./lab.sh build`
   Currently only `lab_open5gs` (UPF TUN device) and `srsue` need it.
 - **Never commit real credentials** — subscriber DB contains test-only values.
 - **Never rename the `lab_ran` network** — referenced externally by oran-sc-ric.
+- **Never hardcode RAN node IDs** for xApp launch — always resolve from dbaas.
 
 ---
 

@@ -49,7 +49,7 @@ cell_cfg:
     mcs_table: qam64
 
 e2:
-  enable_du_e2: false
+  enable_du_e2: true
   enable_cu_cp_e2: false
   enable_cu_up_e2: false
   addrs: 10.53.2.100

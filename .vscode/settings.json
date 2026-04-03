@@ -3,6 +3,12 @@
     "docker": true,
     "grep": true,
     "./lab.sh": true,
-    "true": true
+    "true": true,
+    "srsue": true,
+    "awk": true,
+    "timeout": true,
+    "set": true,
+    "printf": true,
+    "exit": true
   }
 }
