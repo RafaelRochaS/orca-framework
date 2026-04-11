@@ -19,6 +19,12 @@ cu_cp:
               - sst: 1
               - sst: 2
 
+cu_up:
+  ngu:
+    socket:
+      # Bind N3 (GTP-U) on the ran network so UPF user-plane mapping matches packet source.
+      - bind_addr: 10.53.2.30
+
 ru_sdr:
   device_driver: zmq
   device_args: "tx_port=tcp://*:2000,rx_port=tcp://10.53.2.40:2001,id=gnb,base_srate=23.04e6,tx_freq=1842.5e6,rx_freq=1747.5e6"

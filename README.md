@@ -152,6 +152,20 @@ Services start in dependency order:
 ./lab.sh logs ocudu-gnb
 ```
 
+### 6. Validate UE end-to-end connectivity
+
+```bash
+./lab.sh validate
+```
+
+This command validates attach and data path end-to-end by checking:
+- gNB logs for UE control-plane activity (`InitialUEMessage` / `rrcSetupComplete`)
+- Open5GS logs for successful registration (`Registration complete`)
+- UE logs for NAS+PDU success (`Handling Registration Accept`, `PDU Session Establishment successful`)
+- UE tunnel interface (`tun_srsue`) IPv4 assignment
+- UE route preference so internet probes use the UPF tunnel (`tun_srsue`)
+- UE reachability to UPF gateway (`10.45.0.1`) and internet probe (`1.1.1.1` or `8.8.8.8`)
+
 ---
 
 ## Key Endpoints

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # lab.sh — Main control script for the 5G Research Lab
-# Usage: ./lab.sh [up|down|status|logs|restart|clean|ue|xapp]
+# Usage: ./lab.sh [up|down|status|logs|restart|clean|ue|xapp|validate]
 # =============================================================================
 set -euo pipefail
 
@@ -26,6 +26,13 @@ XAPP_HTTP_PORT="8099"
 XAPP_RMR_PORT="4572"
 XAPP_METRICS="DRB.UEThpDl,DRB.UEThpUl"
 XAPP_REPORT_STYLE="5"
+UE_TUN_IFACE="tun_srsue"
+UE_UPF_GATEWAY_IP="10.45.0.1"
+UE_RAN_IFACE="eth0"
+UE_RAN_SUBNET="10.53.2.0/24"
+VALIDATION_LOG_WINDOW="15m"
+VALIDATION_TIMEOUT_SECONDS="120"
+VALIDATION_LOG_TAIL_LINES="2000"
 
 usage() {
   echo ""
@@ -40,6 +47,7 @@ usage() {
   echo "    status    Show health of all containers"
   echo "    logs      Tail logs (optional: ./lab.sh logs <service>)"
   echo "    ue        Attach a UE to the running network"
+  echo "    validate  Validate UE attach + internet path via UPF"
   echo "    xapp      Launch KPM monitoring xApp for the active gNB node"
   echo "    build     Pre-build all source images (do this before first 'up')"
   echo "    clean     Remove all containers, networks, volumes"
@@ -195,6 +203,126 @@ cmd_ue() {
   info "UE container started. Tailing UE logs (Ctrl+C to detach):"
   sleep 2
   docker compose -f "${COMPOSE_FILE}" logs -f srsue
+}
+
+cmd_validate() {
+  info "Validating UE connectivity path (UE ↔ gNB ↔ 5GC ↔ UPF ↔ internet)..."
+
+  local failures=0
+  local gnb_line=""
+  local core_line=""
+  local ue_reg_line=""
+  local ue_pdu_line=""
+  local ue_pdu_ip=""
+  local ue_iface_ip=""
+
+  if ! _container_running "lab_open5gs"; then
+    error "Open5GS is not running. Start the lab first: ./lab.sh up"
+  fi
+  if ! _container_running "lab_gnb"; then
+    error "gNB is not running. Start the lab first: ./lab.sh up"
+  fi
+
+  _provision_subscribers
+
+  if _container_running "lab_ue"; then
+    info "UE container already running"
+  else
+    info "UE container is not running; starting srsUE..."
+    docker compose -f "${COMPOSE_FILE}" up -d srsue >/dev/null
+  fi
+
+  info "Waiting for attach and PDU session evidence in logs (timeout: ${VALIDATION_TIMEOUT_SECONDS}s)..."
+  if _wait_for_attach_evidence "${VALIDATION_TIMEOUT_SECONDS}"; then
+    success "Attach evidence detected"
+  else
+    warn "Attach evidence timed out; collecting current diagnostics"
+  fi
+
+  gnb_line="$(_latest_log_line "ocudu-gnb" "InitialUEMessage|rrcSetupComplete" "${VALIDATION_LOG_WINDOW}")"
+  if [[ -n "${gnb_line}" ]]; then
+    success "gNB log evidence: ${gnb_line}"
+  else
+    warn "gNB log is missing InitialUEMessage/rrcSetupComplete in the last ${VALIDATION_LOG_WINDOW}"
+  fi
+
+  core_line="$(_latest_log_line "open5gs" "Registration complete" "${VALIDATION_LOG_WINDOW}")"
+  if [[ -n "${core_line}" ]]; then
+    success "Core log evidence: ${core_line}"
+  else
+    warn "Open5GS log is missing 'Registration complete' in the last ${VALIDATION_LOG_WINDOW}"
+    failures=$((failures + 1))
+  fi
+
+  ue_reg_line="$(_latest_log_line "srsue" "Handling Registration Accept" "${VALIDATION_LOG_WINDOW}")"
+  if [[ -n "${ue_reg_line}" ]]; then
+    success "UE registration evidence: ${ue_reg_line}"
+  else
+    warn "UE log is missing 'Handling Registration Accept' in the last ${VALIDATION_LOG_WINDOW}"
+  fi
+
+  ue_pdu_line="$(_latest_log_line "srsue" "PDU Session Establishment successful" "${VALIDATION_LOG_WINDOW}")"
+  if [[ -n "${ue_pdu_line}" ]]; then
+    success "UE PDU evidence: ${ue_pdu_line}"
+  else
+    warn "UE log is missing 'PDU Session Establishment successful' in the last ${VALIDATION_LOG_WINDOW}"
+  fi
+
+  if docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "ip -4 addr show dev ${UE_TUN_IFACE} | grep -q 'inet '" >/dev/null 2>&1; then
+    ue_iface_ip="$(docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "ip -4 -o addr show dev ${UE_TUN_IFACE} | awk '{print \$4}' | cut -d/ -f1" 2>/dev/null | tr -d '\r')"
+    success "UE tunnel interface ${UE_TUN_IFACE} is up with IP ${ue_iface_ip}"
+
+    if _ensure_ue_upf_default_route; then
+      success "UE route preference updated to use ${UE_TUN_IFACE} for internet probes"
+    else
+      warn "Failed to normalize UE default routes for UPF internet probe"
+      failures=$((failures + 1))
+    fi
+  else
+    warn "UE interface ${UE_TUN_IFACE} has no IPv4 address"
+    failures=$((failures + 1))
+  fi
+
+  if _ue_ping "${UE_UPF_GATEWAY_IP}" "${UE_TUN_IFACE}"; then
+    success "UE can reach UPF gateway ${UE_UPF_GATEWAY_IP}"
+  else
+    warn "UE cannot reach UPF gateway ${UE_UPF_GATEWAY_IP}"
+    failures=$((failures + 1))
+  fi
+
+  local internet_target=""
+  local internet_ok="false"
+  for internet_target in 1.1.1.1 8.8.8.8; do
+    local route_dev=""
+    route_dev="$(_ue_route_device_for_target "${internet_target}")"
+    if [[ "${route_dev}" != "${UE_TUN_IFACE}" ]]; then
+      warn "Route to ${internet_target} is currently ${route_dev:-unknown} (expected ${UE_TUN_IFACE})"
+      continue
+    fi
+
+    if _ue_ping "${internet_target}" "${UE_TUN_IFACE}"; then
+      success "UE internet probe succeeded via ${internet_target}"
+      internet_ok="true"
+      break
+    fi
+  done
+
+  if [[ "${internet_ok}" != "true" ]]; then
+    warn "UE internet probe failed (tested: 1.1.1.1, 8.8.8.8)"
+    failures=$((failures + 1))
+  fi
+
+  ue_pdu_ip="$(_extract_ue_pdu_ip "${VALIDATION_LOG_WINDOW}")"
+  if [[ -n "${ue_pdu_ip}" ]]; then
+    info "UE PDU session assigned IP: ${ue_pdu_ip}"
+  fi
+
+  echo ""
+  if (( failures == 0 )); then
+    success "Validation PASSED — UE attach and UPF internet path look healthy"
+  else
+    error "Validation FAILED — ${failures} check(s) did not pass. Review logs with: ./lab.sh logs srsue ; ./lab.sh logs ocudu-gnb ; ./lab.sh logs open5gs"
+  fi
 }
 
 _provision_subscribers() {
@@ -451,6 +579,98 @@ _wait_for_subscription_for_ran_node() {
   done
 }
 
+_container_running() {
+  local container_name="$1"
+  [[ "$(docker inspect -f '{{.State.Running}}' "${container_name}" 2>/dev/null || true)" == "true" ]]
+}
+
+_latest_log_line() {
+  local service="$1"
+  local pattern="$2"
+  local since_window="$3"
+
+  docker compose -f "${COMPOSE_FILE}" logs --no-color --since "${since_window}" --tail "${VALIDATION_LOG_TAIL_LINES}" "${service}" 2>/dev/null \
+    | grep -Ei "${pattern}" \
+    | tail -n 1 \
+    || true
+}
+
+_wait_for_attach_evidence() {
+  local timeout="$1"
+  local elapsed=0
+
+  while true; do
+    local gnb_seen=""
+    local core_seen=""
+    local ue_reg_seen=""
+    local ue_pdu_seen=""
+
+    gnb_seen="$(_latest_log_line "ocudu-gnb" "InitialUEMessage|rrcSetupComplete" "${VALIDATION_LOG_WINDOW}")"
+    core_seen="$(_latest_log_line "open5gs" "Registration complete" "${VALIDATION_LOG_WINDOW}")"
+    ue_reg_seen="$(_latest_log_line "srsue" "Handling Registration Accept" "${VALIDATION_LOG_WINDOW}")"
+    ue_pdu_seen="$(_latest_log_line "srsue" "PDU Session Establishment successful" "${VALIDATION_LOG_WINDOW}")"
+
+    if [[ -n "${gnb_seen}" && -n "${core_seen}" && -n "${ue_reg_seen}" && -n "${ue_pdu_seen}" ]]; then
+      return 0
+    fi
+
+    sleep 3
+    elapsed=$((elapsed + 3))
+    if (( elapsed >= timeout )); then
+      return 1
+    fi
+  done
+}
+
+_extract_ue_pdu_ip() {
+  local since_window="$1"
+
+  docker compose -f "${COMPOSE_FILE}" logs --no-color --since "${since_window}" --tail "${VALIDATION_LOG_TAIL_LINES}" srsue 2>/dev/null \
+    | sed -nE 's/.*PDU Session Establishment successful\. IP: *([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*/\1/p' \
+    | tail -n 1
+}
+
+_ue_ping() {
+  local target_ip="$1"
+  local iface="${2:-}"
+  local ping_cmd=""
+  local ping_output=""
+
+  if [[ -n "${iface}" ]]; then
+    ping_cmd="ping -I ${iface} -c 3 -W 3 ${target_ip}"
+  else
+    ping_cmd="ping -c 3 -W 3 ${target_ip}"
+  fi
+
+  ping_output="$(docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "${ping_cmd}" 2>/dev/null || true)"
+  echo "${ping_output}" | grep -q "0% packet loss"
+}
+
+_ensure_ue_upf_default_route() {
+  local ran_gateway=""
+  local ran_ip=""
+
+  ran_gateway="$(docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "ip -4 route show default dev ${UE_RAN_IFACE} | awk 'NR==1 {print \$3}'" 2>/dev/null | tr -d '\r')"
+  ran_ip="$(docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "ip -4 -o addr show dev ${UE_RAN_IFACE} | awk '{print \$4}' | cut -d/ -f1" 2>/dev/null | tr -d '\r')"
+
+  if [[ -z "${ran_gateway}" || -z "${ran_ip}" ]]; then
+    return 1
+  fi
+
+  docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "
+    ip route del default via ${ran_gateway} dev ${UE_RAN_IFACE} >/dev/null 2>&1 || true
+    ip route replace default via ${UE_UPF_GATEWAY_IP} dev ${UE_TUN_IFACE} metric 50
+    ip route replace default via ${ran_gateway} dev ${UE_RAN_IFACE} metric 500
+    ip route replace ${UE_RAN_SUBNET} dev ${UE_RAN_IFACE} src ${ran_ip}
+  " >/dev/null
+}
+
+_ue_route_device_for_target() {
+  local target_ip="$1"
+
+  docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "ip -4 route get ${target_ip} 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if (\$i==\"dev\") {print \$(i+1); exit}}'" 2>/dev/null | tr -d '\r'
+}
+
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 case "${1:-help}" in
   build)   cmd_build ;;
@@ -460,6 +680,7 @@ case "${1:-help}" in
   status)  cmd_status ;;
   logs)    cmd_logs "$@" ;;
   ue)      cmd_ue ;;
+  validate) cmd_validate ;;
   xapp)    cmd_xapp ;;
   clean)   cmd_clean ;;
   shell)   cmd_shell "$@" ;;

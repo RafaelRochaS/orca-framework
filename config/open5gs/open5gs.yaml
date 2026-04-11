@@ -155,7 +155,8 @@ upf:
 
   gtpu:
     server:
-      - address: 127.0.0.7
+      # N3 endpoint advertised to the gNB; must be reachable on the ran network.
+      - address: 10.53.2.20
 
   session:
     - subnet: 10.45.0.0/16
