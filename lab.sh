@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # lab.sh — Main control script for the 5G Research Lab
-# Usage: ./lab.sh [up|down|status|logs|restart|clean|ue|xapp|validate]
+# Usage: ./lab.sh [up|down|status|logs|restart|clean|ue|xapp|xapp-health|validate]
 # =============================================================================
 set -euo pipefail
 
@@ -23,9 +23,13 @@ LAB_RAN_NETWORK="lab_ran"
 RIC_E2TERM_RAN_IP="10.53.2.100"
 GNB_RAN_IP="10.53.2.30"
 XAPP_HTTP_PORT="8099"
-XAPP_RMR_PORT="4572"
+# Must match RMR_SEED_RT (12050 route targets 4560/4561/4562 in this RIC image).
+XAPP_RMR_PORT="4562"
 XAPP_METRICS="DRB.UEThpDl,DRB.UEThpUl"
-XAPP_REPORT_STYLE="5"
+# Style 1 is robust for validation; style 5 needs valid UE IDs and may stay silent.
+XAPP_REPORT_STYLE="1"
+XAPP_HEALTH_HTTP_PORT="18099"
+XAPP_HEALTH_RMR_PORT="4561"
 UE_TUN_IFACE="tun_srsue"
 UE_UPF_GATEWAY_IP="10.45.0.1"
 UE_RAN_IFACE="eth0"
@@ -33,6 +37,9 @@ UE_RAN_SUBNET="10.53.2.0/24"
 VALIDATION_LOG_WINDOW="15m"
 VALIDATION_TIMEOUT_SECONDS="120"
 VALIDATION_LOG_TAIL_LINES="2000"
+XAPP_HEALTH_TIMEOUT_SECONDS="45"
+XAPP_HEALTH_LOG_TAIL_LINES="5000"
+XAPP_HEALTH_TRAFFIC_PINGS="40"
 
 usage() {
   echo ""
@@ -49,6 +56,7 @@ usage() {
   echo "    ue        Attach a UE to the running network"
   echo "    validate  Validate UE attach + internet path via UPF"
   echo "    xapp      Launch KPM monitoring xApp for the active gNB node"
+  echo "    xapp-health  Validate end-to-end KPM flow (UE traffic → gNB → RIC → xApp)"
   echo "    build     Pre-build all source images (do this before first 'up')"
   echo "    clean     Remove all containers, networks, volumes"
   echo "    shell     Open a shell in a running container"
@@ -437,6 +445,145 @@ cmd_xapp() {
   fi
 }
 
+cmd_xapp_health() {
+  info "Running xApp KPM health check (UE traffic -> gNB -> RIC -> xApp)..."
+
+  local failures=0
+  local ran_node_id=""
+  local since_ts=""
+  local gnb_indication_line=""
+  local xapp_indication_line=""
+  local xapp_nonzero_metric_line=""
+  local xapp_probe_output=""
+  local traffic_pid=""
+
+  if [[ ! -d "${RIC_DIR}" ]]; then
+    error "RIC directory not found. Run bootstrap.sh first."
+  fi
+  if ! _container_running "lab_open5gs"; then
+    error "Open5GS is not running. Start the lab first: ./lab.sh up"
+  fi
+  if ! _container_running "lab_gnb"; then
+    error "gNB is not running. Start the lab first: ./lab.sh up"
+  fi
+  if ! docker inspect "${RIC_DBAAS_CONTAINER}" >/dev/null 2>&1; then
+    error "${RIC_DBAAS_CONTAINER} is not running. Start the RIC stack first."
+  fi
+  if ! docker inspect "${RIC_E2TERM_CONTAINER}" >/dev/null 2>&1; then
+    error "${RIC_E2TERM_CONTAINER} is not running. Start the RIC stack first."
+  fi
+
+  _provision_subscribers
+  _attach_e2term_to_lab_ran || warn "Could not auto-attach e2term to ${LAB_RAN_NETWORK}"
+
+  info "Checking gNB <-> RIC E2 SCTP association..."
+  if _wait_for_e2_association 60; then
+    success "E2 SCTP association is active"
+  else
+    warn "E2 SCTP association was not detected within timeout"
+    failures=$((failures + 1))
+  fi
+
+  if _container_running "lab_ue"; then
+    info "UE container already running"
+  else
+    info "UE container is not running; starting srsUE..."
+    docker compose -f "${COMPOSE_FILE}" up -d srsue >/dev/null
+  fi
+
+  info "Waiting for UE tunnel interface ${UE_TUN_IFACE} (timeout: 45s)..."
+  if _wait_for_ue_tunnel_ip 45; then
+    success "UE tunnel interface ${UE_TUN_IFACE} is up"
+  else
+    warn "UE tunnel interface ${UE_TUN_IFACE} did not get an IPv4 address in time"
+    failures=$((failures + 1))
+  fi
+
+  if docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "ip -4 addr show dev ${UE_TUN_IFACE} | grep -q 'inet '" >/dev/null 2>&1; then
+    if _ensure_ue_upf_default_route; then
+      success "UE routing normalized for UPF traffic on ${UE_TUN_IFACE}"
+    else
+      warn "Could not normalize UE default routes"
+      failures=$((failures + 1))
+    fi
+  else
+    warn "UE tunnel interface ${UE_TUN_IFACE} has no IPv4 address"
+    failures=$((failures + 1))
+  fi
+
+  local core_attach_line=""
+  local ue_attach_line=""
+  core_attach_line="$(_latest_log_line "open5gs" "Registration complete" "${VALIDATION_LOG_WINDOW}")"
+  ue_attach_line="$(_latest_log_line "srsue" "PDU Session Establishment successful" "${VALIDATION_LOG_WINDOW}")"
+
+  if [[ -n "${core_attach_line}" ]]; then
+    success "Core attach evidence: ${core_attach_line}"
+  else
+    warn "Open5GS attach evidence not found in the last ${VALIDATION_LOG_WINDOW}"
+  fi
+
+  if [[ -n "${ue_attach_line}" ]]; then
+    success "UE attach evidence: ${ue_attach_line}"
+  else
+    warn "UE attach evidence not found in the last ${VALIDATION_LOG_WINDOW}"
+  fi
+
+  ran_node_id="$(_wait_for_ran_node_id 90 || true)"
+  if [[ -z "${ran_node_id}" ]]; then
+    error "No active RAN node found in RIC state. Ensure gNB is connected first."
+  fi
+
+  info "Using RAN node ID: ${ran_node_id}"
+  since_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  info "Generating UE traffic while running foreground xApp probe..."
+  _generate_ue_traffic &
+  traffic_pid="$!"
+  xapp_probe_output="$(_run_xapp_probe_for_ran_node "${ran_node_id}" "${XAPP_HEALTH_TIMEOUT_SECONDS}")"
+  wait "${traffic_pid}" 2>/dev/null || true
+
+  if echo "${xapp_probe_output}" | grep -Fq "Successfully subscribed with Subscription ID"; then
+    success "xApp probe subscribed successfully"
+  else
+    warn "xApp probe did not report a successful subscription"
+    failures=$((failures + 1))
+  fi
+
+  if _wait_for_gnb_indication_since "${since_ts}" "${XAPP_HEALTH_TIMEOUT_SECONDS}"; then
+    gnb_indication_line="$(_latest_gnb_line_since "${since_ts}" "Sending E2 indication")"
+    success "gNB indication evidence: ${gnb_indication_line}"
+  else
+    warn "No 'Sending E2 indication' log detected from gNB after health check start"
+    failures=$((failures + 1))
+  fi
+
+  xapp_indication_line="$(echo "${xapp_probe_output}" | grep -F "RIC Indication Received" | tail -n 1 || true)"
+  if [[ -n "${xapp_indication_line}" ]]; then
+    success "xApp indication evidence: ${xapp_indication_line}"
+  else
+    warn "xApp probe did not log any RIC indication callbacks within timeout"
+    failures=$((failures + 1))
+  fi
+
+  xapp_nonzero_metric_line="$(echo "${xapp_probe_output}" \
+    | grep -E "Metric: DRB\\.UEThp(Dl|Ul), Value:" \
+    | grep -Ev "Value: \\[ *0+(\\.0+)? *\\]$" \
+    | tail -n 1 || true)"
+  if [[ -n "${xapp_nonzero_metric_line}" ]]; then
+    success "xApp non-zero KPI evidence: ${xapp_nonzero_metric_line}"
+  else
+    warn "No non-zero DRB throughput value observed during the xApp probe"
+    failures=$((failures + 1))
+  fi
+
+  echo ""
+  if (( failures == 0 )); then
+    success "xApp health check PASSED — UE traffic is metrified by gNB and processed by xApp"
+  else
+    error "xApp health check FAILED — ${failures} check(s) did not pass. Review with: ./lab.sh logs ocudu-gnb ; cd repos/oran-sc-ric && docker compose logs python_xapp_runner"
+  fi
+}
+
 cmd_clean() {
   warn "This will remove ALL lab containers, networks, and volumes!"
   read -rp "Are you sure? (yes/no): " confirm
@@ -552,12 +699,13 @@ _launch_xapp_for_ran_node() {
   sleep 2
 
   docker compose -f "${RIC_COMPOSE_FILE}" exec -d "${RIC_XAPP_RUNNER_SERVICE}" \
-    python3 ./kpm_mon_xapp.py \
-    --metrics="${XAPP_METRICS}" \
-    --kpm_report_style="${XAPP_REPORT_STYLE}" \
-    --http_server_port "${XAPP_HTTP_PORT}" \
-    --rmr_port "${XAPP_RMR_PORT}" \
-    --e2_node_id "${ran_node_id}" >/dev/null
+    sh -lc "python3 -u ./kpm_mon_xapp.py \
+      --metrics='${XAPP_METRICS}' \
+      --kpm_report_style='${XAPP_REPORT_STYLE}' \
+      --http_server_port '${XAPP_HTTP_PORT}' \
+      --rmr_port '${XAPP_RMR_PORT}' \
+      --e2_node_id '${ran_node_id}' \
+      >> /proc/1/fd/1 2>> /proc/1/fd/2" >/dev/null
 }
 
 _wait_for_subscription_for_ran_node() {
@@ -577,6 +725,84 @@ _wait_for_subscription_for_ran_node() {
       return 1
     fi
   done
+}
+
+_latest_gnb_line_since() {
+  local since_ts="$1"
+  local pattern="$2"
+
+  docker compose -f "${COMPOSE_FILE}" logs --no-color --since "${since_ts}" --tail "${XAPP_HEALTH_LOG_TAIL_LINES}" ocudu-gnb 2>/dev/null \
+    | grep -E "${pattern}" \
+    | tail -n 1 \
+    || true
+}
+
+_wait_for_gnb_indication_since() {
+  local since_ts="$1"
+  local timeout="$2"
+  local elapsed=0
+
+  while true; do
+    if [[ -n "$(_latest_gnb_line_since "${since_ts}" "Sending E2 indication")" ]]; then
+      return 0
+    fi
+
+    sleep 3
+    elapsed=$((elapsed + 3))
+    if (( elapsed >= timeout )); then
+      return 1
+    fi
+  done
+}
+
+_run_xapp_probe_for_ran_node() {
+  local ran_node_id="$1"
+  local probe_seconds="$2"
+  local timeout_seconds=$((probe_seconds + 10))
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout -k 5 "${timeout_seconds}" docker compose -f "${RIC_COMPOSE_FILE}" exec -T "${RIC_XAPP_RUNNER_SERVICE}" \
+      python3 -u ./kpm_mon_xapp.py \
+      --metrics="${XAPP_METRICS}" \
+      --kpm_report_style="${XAPP_REPORT_STYLE}" \
+      --http_server_port "${XAPP_HEALTH_HTTP_PORT}" \
+      --rmr_port "${XAPP_HEALTH_RMR_PORT}" \
+      --e2_node_id "${ran_node_id}" 2>&1 \
+      || true
+  else
+    docker compose -f "${RIC_COMPOSE_FILE}" exec -T "${RIC_XAPP_RUNNER_SERVICE}" \
+      python3 -u ./kpm_mon_xapp.py \
+      --metrics="${XAPP_METRICS}" \
+      --kpm_report_style="${XAPP_REPORT_STYLE}" \
+      --http_server_port "${XAPP_HEALTH_HTTP_PORT}" \
+      --rmr_port "${XAPP_HEALTH_RMR_PORT}" \
+      --e2_node_id "${ran_node_id}" 2>&1 \
+      || true
+  fi
+}
+
+_wait_for_ue_tunnel_ip() {
+  local timeout="$1"
+  local elapsed=0
+
+  while true; do
+    if docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "ip -4 addr show dev ${UE_TUN_IFACE} | grep -q 'inet '" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    sleep 3
+    elapsed=$((elapsed + 3))
+    if (( elapsed >= timeout )); then
+      return 1
+    fi
+  done
+}
+
+_generate_ue_traffic() {
+  docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "
+    ping -I ${UE_TUN_IFACE} -s 1200 -i 0.05 -c ${XAPP_HEALTH_TRAFFIC_PINGS} -W 1 ${UE_UPF_GATEWAY_IP} >/dev/null 2>&1 || true
+    ping -I ${UE_TUN_IFACE} -s 1200 -i 0.05 -c 20 -W 1 1.1.1.1 >/dev/null 2>&1 || true
+  " >/dev/null
 }
 
 _container_running() {
@@ -682,6 +908,7 @@ case "${1:-help}" in
   ue)      cmd_ue ;;
   validate) cmd_validate ;;
   xapp)    cmd_xapp ;;
+  xapp-health) cmd_xapp_health ;;
   clean)   cmd_clean ;;
   shell)   cmd_shell "$@" ;;
   *)       usage ;;
