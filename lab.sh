@@ -28,8 +28,6 @@ XAPP_RMR_PORT="4562"
 XAPP_METRICS="DRB.UEThpDl,DRB.UEThpUl"
 # Style 1 is robust for validation; style 5 needs valid UE IDs and may stay silent.
 XAPP_REPORT_STYLE="1"
-XAPP_HEALTH_HTTP_PORT="18099"
-XAPP_HEALTH_RMR_PORT="4561"
 UE_TUN_IFACE="tun_srsue"
 UE_UPF_GATEWAY_IP="10.45.0.1"
 UE_RAN_IFACE="eth0"
@@ -37,9 +35,9 @@ UE_RAN_SUBNET="10.53.2.0/24"
 VALIDATION_LOG_WINDOW="15m"
 VALIDATION_TIMEOUT_SECONDS="120"
 VALIDATION_LOG_TAIL_LINES="2000"
-XAPP_HEALTH_TIMEOUT_SECONDS="45"
+XAPP_HEALTH_TIMEOUT_SECONDS="20"
 XAPP_HEALTH_LOG_TAIL_LINES="5000"
-XAPP_HEALTH_TRAFFIC_PINGS="40"
+XAPP_HEALTH_TRAFFIC_PINGS="1500"
 
 usage() {
   echo ""
@@ -454,8 +452,7 @@ cmd_xapp_health() {
   local gnb_indication_line=""
   local xapp_indication_line=""
   local xapp_nonzero_metric_line=""
-  local xapp_probe_output=""
-  local traffic_pid=""
+  local ue_attached="false"
 
   if [[ ! -d "${RIC_DIR}" ]]; then
     error "RIC directory not found. Run bootstrap.sh first."
@@ -491,8 +488,8 @@ cmd_xapp_health() {
     docker compose -f "${COMPOSE_FILE}" up -d srsue >/dev/null
   fi
 
-  info "Waiting for UE tunnel interface ${UE_TUN_IFACE} (timeout: 45s)..."
-  if _wait_for_ue_tunnel_ip 45; then
+  info "Waiting for UE tunnel interface ${UE_TUN_IFACE} (timeout: 30s)..."
+  if _wait_for_ue_tunnel_ip 30; then
     success "UE tunnel interface ${UE_TUN_IFACE} is up"
   else
     warn "UE tunnel interface ${UE_TUN_IFACE} did not get an IPv4 address in time"
@@ -511,6 +508,40 @@ cmd_xapp_health() {
     failures=$((failures + 1))
   fi
 
+  info "Validating UE attach + PDU session evidence..."
+  if _wait_for_attach_evidence 30; then
+    success "UE attach + PDU session evidence detected"
+    ue_attached="true"
+  else
+    warn "UE attach evidence missing; restarting UE once and retrying"
+    docker compose -f "${COMPOSE_FILE}" restart srsue >/dev/null || true
+
+    if _wait_for_ue_tunnel_ip 30; then
+      _ensure_ue_upf_default_route || true
+    fi
+
+    if _wait_for_attach_evidence 30; then
+      success "UE attach + PDU session evidence detected after restart"
+      ue_attached="true"
+    else
+      warn "UE attach + PDU session evidence still missing after retry"
+      failures=$((failures + 1))
+    fi
+  fi
+
+  if _ue_ping "${UE_UPF_GATEWAY_IP}" "${UE_TUN_IFACE}"; then
+    success "UE communication check passed (reachable gateway ${UE_UPF_GATEWAY_IP})"
+  else
+    warn "UE communication check failed (cannot reach gateway ${UE_UPF_GATEWAY_IP})"
+    failures=$((failures + 1))
+  fi
+
+  if _ue_ping "1.1.1.1" "${UE_TUN_IFACE}"; then
+    success "UE internet probe passed via ${UE_TUN_IFACE}"
+  else
+    warn "UE internet probe failed via ${UE_TUN_IFACE} (continuing with local KPI checks)"
+  fi
+
   local core_attach_line=""
   local ue_attach_line=""
   core_attach_line="$(_latest_log_line "open5gs" "Registration complete" "${VALIDATION_LOG_WINDOW}")"
@@ -526,6 +557,9 @@ cmd_xapp_health() {
     success "UE attach evidence: ${ue_attach_line}"
   else
     warn "UE attach evidence not found in the last ${VALIDATION_LOG_WINDOW}"
+    if [[ "${ue_attached}" != "true" ]]; then
+      failures=$((failures + 1))
+    fi
   fi
 
   ran_node_id="$(_wait_for_ran_node_id 90 || true)"
@@ -536,18 +570,16 @@ cmd_xapp_health() {
   info "Using RAN node ID: ${ran_node_id}"
   since_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-  info "Generating UE traffic while running foreground xApp probe..."
-  _generate_ue_traffic &
-  traffic_pid="$!"
-  xapp_probe_output="$(_run_xapp_probe_for_ran_node "${ran_node_id}" "${XAPP_HEALTH_TIMEOUT_SECONDS}")"
-  wait "${traffic_pid}" 2>/dev/null || true
-
-  if echo "${xapp_probe_output}" | grep -Fq "Successfully subscribed with Subscription ID"; then
-    success "xApp probe subscribed successfully"
+  _launch_xapp_for_ran_node "${ran_node_id}" || error "Failed to launch xApp"
+  if _wait_for_subscription_for_ran_node "${ran_node_id}" 60; then
+    success "xApp subscription is active for ${ran_node_id}"
   else
-    warn "xApp probe did not report a successful subscription"
+    warn "xApp subscription validation timed out"
     failures=$((failures + 1))
   fi
+
+  info "Generating UE traffic to stimulate DRB throughput metrics..."
+  _generate_ue_traffic
 
   if _wait_for_gnb_indication_since "${since_ts}" "${XAPP_HEALTH_TIMEOUT_SECONDS}"; then
     gnb_indication_line="$(_latest_gnb_line_since "${since_ts}" "Sending E2 indication")"
@@ -557,22 +589,19 @@ cmd_xapp_health() {
     failures=$((failures + 1))
   fi
 
-  xapp_indication_line="$(echo "${xapp_probe_output}" | grep -F "RIC Indication Received" | tail -n 1 || true)"
-  if [[ -n "${xapp_indication_line}" ]]; then
+  if _wait_for_xapp_indication_since "${since_ts}" "${XAPP_HEALTH_TIMEOUT_SECONDS}"; then
+    xapp_indication_line="$(_latest_xapp_line_since "${since_ts}" "RIC Indication Received")"
     success "xApp indication evidence: ${xapp_indication_line}"
   else
-    warn "xApp probe did not log any RIC indication callbacks within timeout"
+    warn "xApp did not log any RIC indication callbacks within timeout"
     failures=$((failures + 1))
   fi
 
-  xapp_nonzero_metric_line="$(echo "${xapp_probe_output}" \
-    | grep -E "Metric: DRB\\.UEThp(Dl|Ul), Value:" \
-    | grep -Ev "Value: \\[ *0+(\\.0+)? *\\]$" \
-    | tail -n 1 || true)"
-  if [[ -n "${xapp_nonzero_metric_line}" ]]; then
+  if _wait_for_xapp_nonzero_metric_since "${since_ts}" "${XAPP_HEALTH_TIMEOUT_SECONDS}"; then
+    xapp_nonzero_metric_line="$(_latest_xapp_nonzero_metric_line_since "${since_ts}")"
     success "xApp non-zero KPI evidence: ${xapp_nonzero_metric_line}"
   else
-    warn "No non-zero DRB throughput value observed during the xApp probe"
+    warn "No non-zero DRB throughput value observed in xApp logs within timeout"
     failures=$((failures + 1))
   fi
 
@@ -737,6 +766,25 @@ _latest_gnb_line_since() {
     || true
 }
 
+_latest_xapp_line_since() {
+  local since_ts="$1"
+  local pattern="$2"
+
+  docker compose -f "${RIC_COMPOSE_FILE}" logs --no-color --since "${since_ts}" --tail "${XAPP_HEALTH_LOG_TAIL_LINES}" "${RIC_XAPP_RUNNER_SERVICE}" 2>/dev/null \
+    | grep -E "${pattern}" \
+    | tail -n 1 \
+    || true
+}
+
+_latest_xapp_nonzero_metric_line_since() {
+  local since_ts="$1"
+
+  docker compose -f "${RIC_COMPOSE_FILE}" logs --no-color --since "${since_ts}" --tail "${XAPP_HEALTH_LOG_TAIL_LINES}" "${RIC_XAPP_RUNNER_SERVICE}" 2>/dev/null \
+    | grep -E "Metric: DRB\\.UEThp(Dl|Ul), Value: \\[[[:space:]]*([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)[[:space:]]*\\]" \
+    | tail -n 1 \
+    || true
+}
+
 _wait_for_gnb_indication_since() {
   local since_ts="$1"
   local timeout="$2"
@@ -755,30 +803,40 @@ _wait_for_gnb_indication_since() {
   done
 }
 
-_run_xapp_probe_for_ran_node() {
-  local ran_node_id="$1"
-  local probe_seconds="$2"
-  local timeout_seconds=$((probe_seconds + 10))
+_wait_for_xapp_indication_since() {
+  local since_ts="$1"
+  local timeout="$2"
+  local elapsed=0
 
-  if command -v timeout >/dev/null 2>&1; then
-    timeout -k 5 "${timeout_seconds}" docker compose -f "${RIC_COMPOSE_FILE}" exec -T "${RIC_XAPP_RUNNER_SERVICE}" \
-      python3 -u ./kpm_mon_xapp.py \
-      --metrics="${XAPP_METRICS}" \
-      --kpm_report_style="${XAPP_REPORT_STYLE}" \
-      --http_server_port "${XAPP_HEALTH_HTTP_PORT}" \
-      --rmr_port "${XAPP_HEALTH_RMR_PORT}" \
-      --e2_node_id "${ran_node_id}" 2>&1 \
-      || true
-  else
-    docker compose -f "${RIC_COMPOSE_FILE}" exec -T "${RIC_XAPP_RUNNER_SERVICE}" \
-      python3 -u ./kpm_mon_xapp.py \
-      --metrics="${XAPP_METRICS}" \
-      --kpm_report_style="${XAPP_REPORT_STYLE}" \
-      --http_server_port "${XAPP_HEALTH_HTTP_PORT}" \
-      --rmr_port "${XAPP_HEALTH_RMR_PORT}" \
-      --e2_node_id "${ran_node_id}" 2>&1 \
-      || true
-  fi
+  while true; do
+    if [[ -n "$(_latest_xapp_line_since "${since_ts}" "RIC Indication Received")" ]]; then
+      return 0
+    fi
+
+    sleep 3
+    elapsed=$((elapsed + 3))
+    if (( elapsed >= timeout )); then
+      return 1
+    fi
+  done
+}
+
+_wait_for_xapp_nonzero_metric_since() {
+  local since_ts="$1"
+  local timeout="$2"
+  local elapsed=0
+
+  while true; do
+    if [[ -n "$(_latest_xapp_nonzero_metric_line_since "${since_ts}")" ]]; then
+      return 0
+    fi
+
+    sleep 3
+    elapsed=$((elapsed + 3))
+    if (( elapsed >= timeout )); then
+      return 1
+    fi
+  done
 }
 
 _wait_for_ue_tunnel_ip() {
@@ -800,8 +858,8 @@ _wait_for_ue_tunnel_ip() {
 
 _generate_ue_traffic() {
   docker compose -f "${COMPOSE_FILE}" exec -T srsue sh -lc "
-    ping -I ${UE_TUN_IFACE} -s 1200 -i 0.05 -c ${XAPP_HEALTH_TRAFFIC_PINGS} -W 1 ${UE_UPF_GATEWAY_IP} >/dev/null 2>&1 || true
-    ping -I ${UE_TUN_IFACE} -s 1200 -i 0.05 -c 20 -W 1 1.1.1.1 >/dev/null 2>&1 || true
+    ping -I ${UE_TUN_IFACE} -s 1400 -i 0.002 -c ${XAPP_HEALTH_TRAFFIC_PINGS} -W 1 ${UE_UPF_GATEWAY_IP} >/dev/null 2>&1 || true
+    ping -I ${UE_TUN_IFACE} -s 1200 -i 0.02 -c 50 -W 1 1.1.1.1 >/dev/null 2>&1 || true
   " >/dev/null
 }
 
