@@ -34,6 +34,7 @@ ADD . /src
 RUN /src/docker/scripts/install_dependencies.sh all && \
     /src/docker/scripts/install_uhd_dependencies.sh build && \
     /src/docker/scripts/install_dpdk_dependencies.sh build && \
+    apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git clang
 
 
@@ -130,5 +131,6 @@ RUN /usr/local/etc/install_ocudu_dependencies.sh all && \
     /usr/local/etc/install_rohc_dependencies.sh run && \
     /usr/local/etc/install_uhd_dependencies.sh run && \
     /usr/local/etc/install_dpdk_dependencies.sh run && \
+    apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ntpdate && \
     apt-get autoremove && apt-get clean && rm -rf /var/lib/apt/lists/*

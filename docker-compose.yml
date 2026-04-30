@@ -188,14 +188,14 @@ services:
       TOKEN_ENDPOINT: "http://dummy"
       PARTNER_API_ROOT: "http://dummy"
       AVAIL_ZONE_NOTIF_LINK: "http://dummy"
-      SRM_HOST: "http://10.53.3.40:8090/srm/1.0.0"     # OOP Orchestrator (SRM role)
+      SRM_HOST: "http://10.53.3.40:8080/srm/1.0.0"     # OOP Orchestrator (SRM role)
     depends_on:
       mongodb:
         condition: service_healthy
       open5gs:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/docs/"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/oeg/1.0.0/docs/"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -227,11 +227,20 @@ services:
       NETWORK_ADAPTER_BASE_URL: "http://10.53.3.20:7777"    # Open5GS NEF
       EDGE_CLOUD_ADAPTER_NAME: "aeros"
       KUBERNETES_MASTER_TOKEN: "dummy"                  # Dummy to satisfy initialization
-      ADAPTER_BASE_URL: "http://127.0.0.1:6443"              # Dummy
+      ADAPTER_BASE_URL: "http://edgecloud-mock:8081"          # Mock edge cloud adapter
       PLATFORM_PROVIDER: "ORCA"
       ARTIFACT_MANAGER_ADDRESS: ""                           # not used in lab
     depends_on:
       - oop-gateway
+
+  edgecloud-mock:
+    image: nginx:1.27-alpine
+    container_name: lab_edgecloud_mock
+    restart: unless-stopped
+    networks:
+      oop:
+    volumes:
+      - ./docker/edgecloud-mock.conf:/etc/nginx/nginx.conf:ro
 
   # =============================================================================
   # 7. GRAFANA — Observability dashboard for RAN/core metrics
