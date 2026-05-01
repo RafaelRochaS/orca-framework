@@ -15,10 +15,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 RIC_DIR="${SCRIPT_DIR}/repos/oran-sc-ric"
 RIC_COMPOSE_FILE="${RIC_DIR}/docker-compose.yml"
+RIC_XAPP_OVERRIDE_FILE="${SCRIPT_DIR}/ric-xapp.override.yml"
 SUBSCRIBER_CSV="${SCRIPT_DIR}/config/open5gs/subscriber_db.csv"
 RIC_E2TERM_CONTAINER="ric_e2term"
 RIC_DBAAS_CONTAINER="ric_dbaas"
 RIC_XAPP_RUNNER_SERVICE="python_xapp_runner"
+RIC_XAPP_HOST_DIR="${SCRIPT_DIR}/xapps/exposure-xapp"
+RIC_XAPP_CONTAINER_DIR="/opt/orca-xapps"
+RIC_XAPP_ENTRYPOINT="${RIC_XAPP_CONTAINER_DIR}/exposure_xapp.py"
 LAB_RAN_NETWORK="lab_ran"
 RIC_E2TERM_RAN_IP="10.53.2.100"
 GNB_RAN_IP="10.53.2.30"
@@ -53,12 +57,20 @@ usage() {
   echo "    logs      Tail logs (optional: ./lab.sh logs <service>)"
   echo "    ue        Attach a UE to the running network"
   echo "    validate  Validate UE attach + internet path via UPF"
-  echo "    xapp      Launch KPM monitoring xApp for the active gNB node"
+  echo "    xapp      Launch exposure xApp for the active gNB node"
   echo "    xapp-health  Validate end-to-end KPM flow (UE traffic → gNB → RIC → xApp)"
   echo "    build     Pre-build all source images (do this before first 'up')"
   echo "    clean     Remove all containers, networks, volumes"
   echo "    shell     Open a shell in a running container"
   echo ""
+}
+
+_ric_compose() {
+  if [[ -f "${RIC_XAPP_OVERRIDE_FILE}" ]]; then
+    docker compose -f "${RIC_COMPOSE_FILE}" -f "${RIC_XAPP_OVERRIDE_FILE}" "$@"
+  else
+    docker compose -f "${RIC_COMPOSE_FILE}" "$@"
+  fi
 }
 
 # ── Startup sequence ──────────────────────────────────────────────────────────
@@ -110,7 +122,7 @@ cmd_up() {
   info "Step 2/4 — Starting O-RAN SC Near-RT RIC..."
   if [[ -d "${RIC_DIR}" && ! -f "${RIC_DIR}/.stub" ]]; then
     ric_enabled=true
-    docker compose -f "${RIC_COMPOSE_FILE}" up -d
+    _ric_compose up -d
     info "  Waiting for RIC E2 termination (up to 60s)..."
     sleep 20  # RIC components need time to interconnect internally
     _attach_e2term_to_lab_ran || warn "  Could not auto-attach e2term to ${LAB_RAN_NETWORK}"
@@ -143,7 +155,7 @@ cmd_up() {
     ran_node_id="$(_wait_for_ran_node_id 90 || true)"
     if [[ -n "${ran_node_id}" ]]; then
       success "  Active RAN node: ${ran_node_id}"
-      info "  Launching KPM xApp for ${ran_node_id}..."
+      info "  Launching exposure xApp for ${ran_node_id}..."
       if _launch_xapp_for_ran_node "${ran_node_id}"; then
         if _wait_for_subscription_for_ran_node "${ran_node_id}" 60; then
           success "  xApp subscription is active for ${ran_node_id}"
@@ -175,7 +187,7 @@ cmd_down() {
   docker compose -f "${COMPOSE_FILE}" down
   docker rm -f lab_ue >/dev/null 2>&1 || true
   if [[ -d "${RIC_DIR}" ]]; then
-    docker compose -f "${RIC_COMPOSE_FILE}" down 2>/dev/null || true
+    _ric_compose down 2>/dev/null || true
   fi
   success "Lab stopped"
 }
@@ -187,7 +199,7 @@ cmd_status() {
   echo ""
   if [[ -d "${RIC_DIR}" ]]; then
     echo -e "${CYAN}═══ Near-RT RIC Status ════════════════════════════════${NC}"
-    docker compose -f "${RIC_COMPOSE_FILE}" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null || \
+    _ric_compose ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null || \
       warn "RIC not running"
     echo ""
   fi
@@ -420,7 +432,7 @@ _provision_subscribers() {
 }
 
 cmd_xapp() {
-  info "Launching KPM monitoring xApp..."
+  info "Launching exposure xApp..."
   if [[ ! -d "${RIC_DIR}" ]]; then
     error "RIC directory not found. Run bootstrap.sh first."
   fi
@@ -444,7 +456,7 @@ cmd_xapp() {
 }
 
 cmd_xapp_health() {
-  info "Running xApp KPM health check (UE traffic -> gNB -> RIC -> xApp)..."
+  info "Running exposure xApp KPM health check (UE traffic -> gNB -> RIC -> xApp)..."
 
   local failures=0
   local ran_node_id=""
@@ -623,7 +635,7 @@ cmd_clean() {
   docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans
   docker rm -f lab_ue >/dev/null 2>&1 || true
   if [[ -d "${RIC_DIR}" ]]; then
-    docker compose -f "${RIC_COMPOSE_FILE}" down -v --remove-orphans 2>/dev/null || true
+    _ric_compose down -v --remove-orphans 2>/dev/null || true
   fi
   success "Lab cleaned"
 }
@@ -724,11 +736,16 @@ _wait_for_ran_node_id() {
 _launch_xapp_for_ran_node() {
   local ran_node_id="$1"
 
-  docker compose -f "${RIC_COMPOSE_FILE}" restart "${RIC_XAPP_RUNNER_SERVICE}" >/dev/null 2>&1 || true
+  if [[ ! -f "${RIC_XAPP_HOST_DIR}/exposure_xapp.py" ]]; then
+    warn "Exposure xApp not found at ${RIC_XAPP_HOST_DIR}/exposure_xapp.py"
+    return 1
+  fi
+
+  _ric_compose restart "${RIC_XAPP_RUNNER_SERVICE}" >/dev/null 2>&1 || true
   sleep 2
 
-  docker compose -f "${RIC_COMPOSE_FILE}" exec -d "${RIC_XAPP_RUNNER_SERVICE}" \
-    sh -lc "python3 -u ./kpm_mon_xapp.py \
+  _ric_compose exec -d "${RIC_XAPP_RUNNER_SERVICE}" \
+    sh -lc "RIC_XAPP_LIB_DIR='/opt/xApps' python3 -u '${RIC_XAPP_ENTRYPOINT}' \
       --metrics='${XAPP_METRICS}' \
       --kpm_report_style='${XAPP_REPORT_STYLE}' \
       --http_server_port '${XAPP_HTTP_PORT}' \
@@ -770,7 +787,7 @@ _latest_xapp_line_since() {
   local since_ts="$1"
   local pattern="$2"
 
-  docker compose -f "${RIC_COMPOSE_FILE}" logs --no-color --since "${since_ts}" --tail "${XAPP_HEALTH_LOG_TAIL_LINES}" "${RIC_XAPP_RUNNER_SERVICE}" 2>/dev/null \
+  _ric_compose logs --no-color --since "${since_ts}" --tail "${XAPP_HEALTH_LOG_TAIL_LINES}" "${RIC_XAPP_RUNNER_SERVICE}" 2>/dev/null \
     | grep -E "${pattern}" \
     | tail -n 1 \
     || true
@@ -779,7 +796,7 @@ _latest_xapp_line_since() {
 _latest_xapp_nonzero_metric_line_since() {
   local since_ts="$1"
 
-  docker compose -f "${RIC_COMPOSE_FILE}" logs --no-color --since "${since_ts}" --tail "${XAPP_HEALTH_LOG_TAIL_LINES}" "${RIC_XAPP_RUNNER_SERVICE}" 2>/dev/null \
+  _ric_compose logs --no-color --since "${since_ts}" --tail "${XAPP_HEALTH_LOG_TAIL_LINES}" "${RIC_XAPP_RUNNER_SERVICE}" 2>/dev/null \
     | grep -E "Metric: DRB\\.UEThp(Dl|Ul), Value: \\[[[:space:]]*([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)[[:space:]]*\\]" \
     | tail -n 1 \
     || true

@@ -27,6 +27,7 @@ orca-framework/
 ├── bootstrap.sh          # One-time host setup — rarely needs changes
 ├── lab.sh                # Lab lifecycle (up/down/build/status/logs/ue/xapp)
 ├── docker-compose.yml    # Core stack — Open5GS, gNB, UE, OOP, Grafana
+├── ric-xapp.override.yml # Mounts ORCA xApps into the RIC runner
 │
 ├── config/
 │   ├── open5gs/          # 5GC config + subscriber DB (IMSI/K/OPc)
@@ -34,6 +35,8 @@ orca-framework/
 │   └── grafana/          # Datasource provisioning
 │
 ├── xapps/
+│   ├── exposure-xapp/
+│   │   └── exposure_xapp.py   # Exposure xApp — KPM → SDL metrics
 │   └── qod-xapp/
 │       └── qod_xapp.py   # QoD xApp scaffold — A1 + KPM + RC control
 │
@@ -58,13 +61,13 @@ orca-framework/
 ./lab.sh build
 
 # Lab lifecycle
-./lab.sh up          # Start everything + auto-wire RIC E2 + auto-launch KPM xApp
+./lab.sh up          # Start everything + auto-wire RIC E2 + auto-launch exposure xApp
 ./lab.sh down        # Stop everything
 ./lab.sh restart     # down + up
 ./lab.sh status      # Table of container health and ports
 ./lab.sh logs [svc]  # Tail logs (omit service name for all)
 ./lab.sh ue          # Start srsUE and attach to network
-./lab.sh xapp        # Launch/relaunch KPM xApp for the currently registered gNB node
+./lab.sh xapp        # Launch/relaunch exposure xApp for the currently registered gNB node
 ./lab.sh clean       # Destroy all containers + volumes (destructive)
 ./lab.sh shell [svc] # Open bash in a running container
 
@@ -75,7 +78,8 @@ docker compose build oop-gateway oop-orchestrator
 cd repos/oran-sc-ric
 docker compose up -d
 docker compose logs -f e2term
-docker compose exec python_xapp_runner python3 ./kpm_mon_xapp.py
+docker compose -f docker-compose.yml -f ../../ric-xapp.override.yml exec \
+  python_xapp_runner sh -lc "RIC_XAPP_LIB_DIR=/opt/xApps python3 /opt/orca-xapps/exposure_xapp.py"
 docker exec ric_dbaas redis-cli --raw KEYS '{e2Manager},RAN:*'
 ```
 
@@ -199,7 +203,7 @@ by stale/hardcoded RAN node IDs.
 
 Current behavior:
 - RAN node is resolved dynamically from dbaas key pattern `{e2Manager},RAN:*`
-- `lab.sh up` and `lab.sh xapp` launch KPM xApp with the resolved `--e2_node_id`
+- `lab.sh up` and `lab.sh xapp` launch the exposure xApp with the resolved `--e2_node_id`
 - Subscription is validated against `{submgr_e2SubsDb},*` for the same `RanName`
 
 ### ETSI OpenOP repos (status: ACTIVE)
@@ -247,6 +251,7 @@ Expected success path after fix:
 - **Never commit real credentials** — subscriber DB contains test-only values.
 - **Never rename the `lab_ran` network** — referenced externally by oran-sc-ric.
 - **Never hardcode RAN node IDs** for xApp launch — always resolve from dbaas.
+- **Do not copy RIC xApp libs into `xapps/`** — reuse `repos/oran-sc-ric/xApps/python/lib` via `ric-xapp.override.yml`.
 
 ---
 
