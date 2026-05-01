@@ -36,7 +36,8 @@ orca-framework/
 │
 ├── xapps/
 │   ├── exposure-xapp/
-│   │   └── exposure_xapp.py   # Exposure xApp — KPM → SDL metrics
+│   │   ├── exposure_xapp.py              # Exposure xApp — KPM → SDL metrics
+│   │   └── connectivity_insights_xapp.py # Connectivity Insights xApp — HTTP API reads SDL metrics
 │   └── qod-xapp/
 │       └── qod_xapp.py   # QoD xApp scaffold — A1 + KPM + RC control
 │
@@ -80,6 +81,8 @@ docker compose up -d
 docker compose logs -f e2term
 docker compose -f docker-compose.yml -f ../../ric-xapp.override.yml exec \
   python_xapp_runner sh -lc "RIC_XAPP_LIB_DIR=/opt/xApps python3 /opt/orca-xapps/exposure_xapp.py"
+docker compose -f docker-compose.yml -f ../../ric-xapp.override.yml exec \
+  python_xapp_runner sh -lc "python3 /opt/orca-xapps/connectivity_insights_xapp.py --port 8093"
 docker exec ric_dbaas redis-cli --raw KEYS '{e2Manager},RAN:*'
 ```
 

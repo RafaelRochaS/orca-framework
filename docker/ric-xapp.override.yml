@@ -1,8 +1,6 @@
-version: '3.9'
-
 services:
   python_xapp_runner:
     volumes:
       - type: bind
-        source: ./xapps/exposure-xapp
+        source: ../xapps/exposure-xapp
         target: /opt/orca-xapps
