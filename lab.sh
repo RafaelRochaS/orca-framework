@@ -23,10 +23,15 @@ RIC_XAPP_RUNNER_SERVICE="python_xapp_runner"
 RIC_XAPP_HOST_DIR="${SCRIPT_DIR}/xapps/exposure-xapp"
 RIC_XAPP_CONTAINER_DIR="/opt/orca-xapps"
 RIC_XAPP_ENTRYPOINT="${RIC_XAPP_CONTAINER_DIR}/exposure_xapp.py"
+INSIGHTS_ENTRYPOINT="${RIC_XAPP_CONTAINER_DIR}/connectivity_insights_xapp.py"
+XAPPS_NETWORK="lab_xapps"
+XAPPS_SUBNET="10.53.4.0/24"
 LAB_RAN_NETWORK="lab_ran"
 RIC_E2TERM_RAN_IP="10.53.2.100"
 GNB_RAN_IP="10.53.2.30"
 XAPP_HTTP_PORT="8099"
+INSIGHTS_HTTP_PORT="8093"
+OEG_BASE_URL="http://localhost:8080/oeg/1.0.0"
 # Must match RMR_SEED_RT (12050 route targets 4560/4561/4562 in this RIC image).
 XAPP_RMR_PORT="4562"
 XAPP_METRICS="DRB.UEThpDl,DRB.UEThpUl"
@@ -58,6 +63,9 @@ usage() {
   echo "    ue        Attach a UE to the running network"
   echo "    validate  Validate UE attach + internet path via UPF"
   echo "    xapp      Launch exposure xApp for the active gNB node"
+  echo "    insights  Launch Connectivity Insights xApp"
+  echo "    insights-check  Query the Connectivity Insights endpoint"
+  echo "    insights-e2e  Query OEG -> SRM -> xApp connectivity"
   echo "    xapp-health  Validate end-to-end KPM flow (UE traffic → gNB → RIC → xApp)"
   echo "    build     Pre-build all source images (do this before first 'up')"
   echo "    clean     Remove all containers, networks, volumes"
@@ -120,6 +128,7 @@ cmd_up() {
 
   # Step 2: O-RAN SC Near-RT RIC
   info "Step 2/4 — Starting O-RAN SC Near-RT RIC..."
+  _ensure_xapps_network
   if [[ -d "${RIC_DIR}" && ! -f "${RIC_DIR}/.stub" ]]; then
     ric_enabled=true
     _ric_compose up -d
@@ -168,6 +177,13 @@ cmd_up() {
     else
       warn "  Could not resolve a RAN node ID from RIC; skipping auto xApp launch"
     fi
+
+    info "  Launching Connectivity Insights xApp..."
+    if _launch_insights_server; then
+      success "  Connectivity Insights xApp started"
+    else
+      warn "  Failed to launch Connectivity Insights xApp"
+    fi
   fi
 
   echo ""
@@ -177,6 +193,7 @@ cmd_up() {
   echo -e "  Open5GS WebUI  → ${CYAN}http://localhost:9999${NC}"
   echo -e "  CAMARA API GW  → ${CYAN}http://localhost:8080${NC}"
   echo -e "  OOP Dashboard  → ${CYAN}http://localhost:8090${NC}"
+  echo -e "  Connectivity Insights → ${CYAN}http://localhost:${INSIGHTS_HTTP_PORT}/connectivity-insights${NC}"
   echo -e "  Grafana        → ${CYAN}http://localhost:3000${NC}  (admin/admin)"
   echo ""
   echo -e "  To attach a UE: ${YELLOW}./lab.sh ue${NC}"
@@ -455,6 +472,59 @@ cmd_xapp() {
   fi
 }
 
+cmd_insights() {
+  info "Launching Connectivity Insights xApp..."
+  if [[ ! -d "${RIC_DIR}" ]]; then
+    error "RIC directory not found. Run bootstrap.sh first."
+  fi
+  if _launch_insights_server; then
+    success "Connectivity Insights xApp started on port ${INSIGHTS_HTTP_PORT} (inside ${RIC_XAPP_RUNNER_SERVICE})"
+  else
+    error "Connectivity Insights xApp failed to start"
+  fi
+}
+
+cmd_insights_check() {
+  info "Querying Connectivity Insights endpoint..."
+  if [[ ! -d "${RIC_DIR}" ]]; then
+    error "RIC directory not found. Run bootstrap.sh first."
+  fi
+
+  _ric_compose exec -T "${RIC_XAPP_RUNNER_SERVICE}" sh -lc "
+    if command -v curl >/dev/null 2>&1; then
+      curl -s 'http://127.0.0.1:${INSIGHTS_HTTP_PORT}/connectivity-insights?windowSeconds=60' || true
+    else
+      python3 - <<'PY'
+import urllib.request
+url = 'http://127.0.0.1:${INSIGHTS_HTTP_PORT}/connectivity-insights?windowSeconds=60'
+with urllib.request.urlopen(url, timeout=5) as resp:
+    print(resp.read().decode('utf-8'))
+PY
+    fi
+  " || {
+    warn "Insights endpoint not reachable; showing a mocked response"
+    cat <<'EOF'
+{"packetDelayBudget":"meets the application requirements","targetMinDownstreamRate":"meets the application requirements","targetMinUpstreamRate":"meets the application requirements","packetlossErrorRate":"meets the application requirements","jitter":"meets the application requirements","additionalKPIs":{"signalStrength":"excellent","connectivityType":"5G-SA"},"device":{"phoneNumber":"+123456789","networkAccessIdentifier":"123456789@domain.com","ipv4Address":{"publicAddress":"84.125.93.10","publicPort":59765},"ipv6Address":"2001:db8:85a3:8d3:1319:8a2e:370:7344"}}
+EOF
+  }
+}
+
+cmd_insights_e2e() {
+  info "Querying OEG -> SRM -> xApp Connectivity Insights..."
+  local url="${OEG_BASE_URL}/connectivity-insights?windowSeconds=60"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -s "${url}" || true
+  else
+    python3 - <<PY
+import urllib.request
+url = "${url}"
+with urllib.request.urlopen(url, timeout=5) as resp:
+    print(resp.read().decode('utf-8'))
+PY
+  fi
+}
+
 cmd_xapp_health() {
   info "Running exposure xApp KPM health check (UE traffic -> gNB -> RIC -> xApp)..."
 
@@ -660,6 +730,21 @@ _wait_healthy() {
   echo ""
 }
 
+_ensure_xapps_network() {
+  if docker network inspect "${XAPPS_NETWORK}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  info "Creating shared xApps network ${XAPPS_NETWORK} (${XAPPS_SUBNET})..."
+  if docker network create --driver bridge --subnet "${XAPPS_SUBNET}" "${XAPPS_NETWORK}" >/dev/null 2>&1; then
+    success "  Created ${XAPPS_NETWORK}"
+    return 0
+  fi
+
+  warn "  Failed to create ${XAPPS_NETWORK}"
+  return 1
+}
+
 _attach_e2term_to_lab_ran() {
   if ! docker network inspect "${LAB_RAN_NETWORK}" >/dev/null 2>&1; then
     warn "  ${LAB_RAN_NETWORK} network is not available yet"
@@ -751,6 +836,19 @@ _launch_xapp_for_ran_node() {
       --http_server_port '${XAPP_HTTP_PORT}' \
       --rmr_port '${XAPP_RMR_PORT}' \
       --e2_node_id '${ran_node_id}' \
+      >> /proc/1/fd/1 2>> /proc/1/fd/2" >/dev/null
+}
+
+_launch_insights_server() {
+  if [[ ! -f "${RIC_XAPP_HOST_DIR}/connectivity_insights_xapp.py" ]]; then
+    warn "Connectivity Insights xApp not found at ${RIC_XAPP_HOST_DIR}/connectivity_insights_xapp.py"
+    return 1
+  fi
+
+  _ric_compose up -d "${RIC_XAPP_RUNNER_SERVICE}" >/dev/null 2>&1 || true
+
+  _ric_compose exec -d "${RIC_XAPP_RUNNER_SERVICE}" \
+    sh -lc "python3 -u '${INSIGHTS_ENTRYPOINT}' --port '${INSIGHTS_HTTP_PORT}' \
       >> /proc/1/fd/1 2>> /proc/1/fd/2" >/dev/null
 }
 
@@ -983,6 +1081,9 @@ case "${1:-help}" in
   ue)      cmd_ue ;;
   validate) cmd_validate ;;
   xapp)    cmd_xapp ;;
+  insights) cmd_insights ;;
+  insights-check) cmd_insights_check ;;
+  insights-e2e) cmd_insights_e2e ;;
   xapp-health) cmd_xapp_health ;;
   clean)   cmd_clean ;;
   shell)   cmd_shell "$@" ;;

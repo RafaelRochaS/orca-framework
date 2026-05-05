@@ -1,6 +1,15 @@
 services:
   python_xapp_runner:
+    ports:
+      - "8093:8093"
+    networks:
+      lab_xapps:
+        ipv4_address: 10.53.4.50
     volumes:
       - type: bind
-        source: ../xapps/exposure-xapp
+        source: ../../xapps/exposure-xapp
         target: /opt/orca-xapps
+
+networks:
+  lab_xapps:
+    external: true

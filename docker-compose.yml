@@ -32,6 +32,11 @@ networks:
       config:
         - subnet: 10.53.3.0/24
 
+  # Shared xApps network: SRM ↔ xApps (RIC python runner)
+  xapps:
+    name: lab_xapps
+    external: true
+
 volumes:
   mongodb_data:
   open5gs_config:
@@ -189,6 +194,12 @@ services:
       PARTNER_API_ROOT: "http://dummy"
       AVAIL_ZONE_NOTIF_LINK: "http://dummy"
       SRM_HOST: "http://10.53.3.40:8080/srm/1.0.0"     # OOP Orchestrator (SRM role)
+      CONNECTIVITY_INSIGHTS_TIMEOUT: "5"
+      CONNECTIVITY_INSIGHTS_SRM_BASE_URL: "http://10.53.3.40:8080/srm/1.0.0/insights"
+    volumes:
+      - ./oop/oeg-overrides/edge_cloud_management_api/app.py:/usr/src/app/edge_cloud_management_api/app.py:ro
+      - ./oop/oeg-overrides/edge_cloud_management_api/controllers/connectivity_insights_controller.py:/usr/src/app/edge_cloud_management_api/controllers/connectivity_insights_controller.py:ro
+      - ./oop/oeg-overrides/edge_cloud_management_api/specification/connectivity_insights.yaml:/usr/src/app/edge_cloud_management_api/specification/connectivity_insights.yaml:ro
     depends_on:
       mongodb:
         condition: service_healthy
@@ -220,6 +231,8 @@ services:
         ipv4_address: 10.53.1.40
       ran:
         ipv4_address: 10.53.2.50
+      xapps:
+        ipv4_address: 10.53.4.40
     ports:
       - "8090:8080"           # Host 8090 → container 8080 (SRM listens on 8080)
     environment:
@@ -230,6 +243,12 @@ services:
       ADAPTER_BASE_URL: "http://edgecloud-mock:8081"          # Mock edge cloud adapter
       PLATFORM_PROVIDER: "ORCA"
       ARTIFACT_MANAGER_ADDRESS: ""                           # not used in lab
+      CONNECTIVITY_INSIGHTS_BASE_URL: "http://10.53.4.50:8093"
+      CONNECTIVITY_INSIGHTS_TIMEOUT: "5"
+    volumes:
+      - ./oop/srm-overrides/src/__main__.py:/usr/src/app/src/__main__.py:ro
+      - ./oop/srm-overrides/src/controllers/connectivity_insights_controller.py:/usr/src/app/src/controllers/connectivity_insights_controller.py:ro
+      - ./oop/srm-overrides/src/swagger/connectivity_insights.yaml:/usr/src/app/src/swagger/connectivity_insights.yaml:ro
     depends_on:
       - oop-gateway
 

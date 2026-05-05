@@ -1,0 +1,70 @@
+openapi: 3.0.3
+info:
+  title: Connectivity Insights API (OEG)
+  version: 1.0.0
+servers:
+  - url: http://virtualserver:8080/oeg/1.0.0
+paths:
+  /connectivity-insights:
+    get:
+      tags:
+        - Connectivity Insights
+      summary: Retrieve connectivity insights for a device
+      operationId: edge_cloud_management_api.controllers.connectivity_insights_controller.get_connectivity_insights
+      parameters:
+        - name: windowSeconds
+          in: query
+          schema:
+            type: integer
+        - name: e2NodeId
+          in: query
+          schema:
+            type: string
+        - name: ueIds
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Connectivity insights payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectivityInsightsResponse'
+        "502":
+          description: Backend unavailable
+components:
+  schemas:
+    ConnectivityInsightsResponse:
+      type: object
+      properties:
+        packetDelayBudget:
+          type: string
+        targetMinDownstreamRate:
+          type: string
+        targetMinUpstreamRate:
+          type: string
+        packetlossErrorRate:
+          type: string
+        jitter:
+          type: string
+        additionalKPIs:
+          type: object
+          additionalProperties:
+            type: string
+        device:
+          type: object
+          properties:
+            phoneNumber:
+              type: string
+            networkAccessIdentifier:
+              type: string
+            ipv4Address:
+              type: object
+              properties:
+                publicAddress:
+                  type: string
+                publicPort:
+                  type: integer
+            ipv6Address:
+              type: string
