@@ -39,14 +39,28 @@ def _extract_query_params() -> Dict[str, str]:
     if not connexion.request:
         return params
 
-    for key in connexion.request.args:
-        values = connexion.request.args.getlist(key)
+    request = connexion.request
+    args = None
+    if hasattr(request, "args"):
+        args = request.args
+    elif hasattr(request, "query_params"):
+        args = request.query_params
+
+    if not args:
+        return params
+
+    for key in args:
+        if hasattr(args, "getlist"):
+            values = args.getlist(key)
+        else:
+            value = args.get(key)
+            values = [] if value is None else [value]
         if not values:
             continue
         if len(values) == 1:
-            params[key] = values[0]
+            params[key] = str(values[0])
         else:
-            params[key] = ",".join(values)
+            params[key] = ",".join(str(value) for value in values)
     return params
 
 

@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import signal
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -23,10 +25,22 @@ except Exception as exc:  # pragma: no cover - only used if pydantic is unavaila
             self.__dict__.update(data)
 
         def model_dump(self) -> Dict[str, Any]:
-            return dict(self.__dict__)
+            return _dump_value(self.__dict__)
 
     def Field(default: Any, **_: Any) -> Any:  # type: ignore[misc]
         return default
+
+
+    def _dump_value(value: Any) -> Any:
+        if isinstance(value, BaseModel):
+            return value.model_dump()
+        if isinstance(value, Mapping):
+            return {key: _dump_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [_dump_value(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(_dump_value(item) for item in value)
+        return value
 
 
 logger = logging.getLogger("connectivity-insights-xapp")
@@ -92,7 +106,16 @@ class SdlMetricsClient:
         """Fetch the latest metrics payloads from SDL."""
         if not self._enabled or self._sdl is None:
             return []
+        use_subprocess = os.environ.get("CONNECTIVITY_SDL_USE_SUBPROCESS", "1") == "1"
+        if use_subprocess:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, self._fetch_metrics_subprocess, e2_node_id, ue_ids)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._fetch_metrics_sync, e2_node_id, ue_ids)
 
+    def _fetch_metrics_sync(
+        self, e2_node_id: Optional[str], ue_ids: Optional[List[int]]
+    ) -> List[MetricsPayload]:
         raw_entries: Dict[str, Any] = {}
         if e2_node_id:
             keys = self._build_keys(e2_node_id, ue_ids)
@@ -102,6 +125,95 @@ class SdlMetricsClient:
 
         payloads: List[MetricsPayload] = []
         for value in raw_entries.values():
+            payload = self._decode_payload(value)
+            if payload:
+                payloads.append(payload)
+        return payloads
+
+    def _fetch_metrics_subprocess(
+        self, e2_node_id: Optional[str], ue_ids: Optional[List[int]]
+    ) -> List[MetricsPayload]:
+        timeout_seconds = float(os.environ.get("CONNECTIVITY_SDL_SUBPROCESS_TIMEOUT", "1.5"))
+        env = os.environ.copy()
+        env["SDL_NAMESPACE"] = self._namespace
+        env["SDL_KEY_PREFIX"] = self._key_prefix
+        env["SDL_E2_NODE_ID"] = e2_node_id or ""
+        env["SDL_UE_IDS"] = ",".join(str(value) for value in (ue_ids or []))
+
+        script = """
+import json
+import os
+
+def _stringify(value):
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode('utf-8', errors='ignore')
+    return str(value)
+
+namespace = os.environ.get('SDL_NAMESPACE', '')
+prefix = os.environ.get('SDL_KEY_PREFIX', '')
+e2_node_id = os.environ.get('SDL_E2_NODE_ID') or None
+ue_ids_raw = os.environ.get('SDL_UE_IDS', '')
+ue_ids = [int(value) for value in ue_ids_raw.split(',') if value]
+
+try:
+    import ricsdl
+    sdl = ricsdl.SDL()
+except Exception:
+    print('[]')
+    raise SystemExit(0)
+
+raw_entries = {}
+if e2_node_id:
+    keys = [f"{prefix}{e2_node_id}:cell"]
+    for ue_id in ue_ids:
+        keys.append(f"{prefix}{e2_node_id}:ue:{ue_id}")
+    try:
+        raw_entries = sdl.get(namespace, keys)
+    except Exception:
+        raw_entries = {}
+else:
+    pattern = f"{prefix}*"
+    for name in ("find_and_get", "findAndGet"):
+        finder = getattr(sdl, name, None)
+        if finder:
+            try:
+                raw_entries = finder(namespace, pattern)
+            except Exception:
+                raw_entries = {}
+            break
+
+if not raw_entries:
+    print('[]')
+    raise SystemExit(0)
+
+values = [_stringify(value) for value in raw_entries.values()]
+print(json.dumps(values))
+"""
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("SDL subprocess timed out after %.2fs", timeout_seconds)
+            return []
+
+        if result.returncode != 0:
+            logger.warning("SDL subprocess failed: %s", result.stderr.strip())
+            return []
+
+        try:
+            values = json.loads(result.stdout.strip() or "[]")
+        except json.JSONDecodeError:
+            logger.warning("SDL subprocess returned invalid JSON")
+            return []
+
+        payloads: List[MetricsPayload] = []
+        for value in values:
             payload = self._decode_payload(value)
             if payload:
                 payloads.append(payload)
@@ -193,6 +305,7 @@ class ServiceConfig:
     namespace: str
     key_prefix: str
     window_seconds: int
+    sdl_timeout_seconds: float
     thresholds: Thresholds
     device_defaults: DeviceDefaults
 
@@ -239,7 +352,12 @@ class ConnectivityInsightsService:
             ),
         )
 
-        entries = await self._sdl_client.fetch_metrics(e2_node_id, ue_ids)
+        entries = await _safe_fetch_metrics(
+            self._sdl_client,
+            e2_node_id,
+            ue_ids,
+            self._config.sdl_timeout_seconds,
+        )
         entries = _filter_by_window(entries, window_seconds)
         aggregates = _aggregate_metrics(entries)
 
@@ -296,13 +414,16 @@ async def _handle_client(
     service: ConnectivityInsightsService,
 ) -> None:
     try:
-        request_data = await reader.readuntil(b"\r\n\r\n")
+        request_data = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=5.0)
     except asyncio.IncompleteReadError:
         writer.close()
         await writer.wait_closed()
         return
     except asyncio.LimitOverrunError:
         await _send_response(writer, 414, {"error": "request too large"})
+        return
+    except asyncio.TimeoutError:
+        await _send_response(writer, 408, {"error": "request timeout"})
         return
 
     request_line = request_data.decode("ascii", errors="ignore").split("\r\n", 1)[0]
@@ -327,8 +448,20 @@ async def _handle_client(
     if path != "/connectivity-insights":
         await _send_response(writer, 404, {"error": "not found"})
         return
-
-    response = await service.get_connectivity_insights(query)
+    logger.info("Insights request: %s", query)
+    try:
+        response = await asyncio.wait_for(
+            service.get_connectivity_insights(query),
+            timeout=6.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Insights handler timed out")
+        await _send_response(writer, 504, {"error": "upstream timeout"})
+        return
+    except Exception as exc:
+        logger.exception("Insights handler failed: %s", exc)
+        await _send_response(writer, 500, {"error": "internal error"})
+        return
     payload = response.model_dump() if _PYDANTIC_AVAILABLE else response.model_dump()
     await _send_response(writer, 200, payload)
 
@@ -358,9 +491,44 @@ async def _send_response(writer: asyncio.StreamWriter, status: int, payload: Map
     await writer.wait_closed()
 
 
+async def _safe_fetch_metrics(
+    client: SdlMetricsClient,
+    e2_node_id: Optional[str],
+    ue_ids: Optional[List[int]],
+    timeout_seconds: float,
+) -> List[MetricsPayload]:
+    if timeout_seconds <= 0:
+        return await client.fetch_metrics(e2_node_id, ue_ids)
+    logger.info("Fetching SDL metrics (timeout=%.2fs)", timeout_seconds)
+    try:
+        task = asyncio.create_task(client.fetch_metrics(e2_node_id, ue_ids))
+        done, pending = await asyncio.wait({task}, timeout=timeout_seconds)
+        if pending:
+            logger.warning("SDL fetch exceeded %.2fs", timeout_seconds)
+            for pending_task in pending:
+                pending_task.add_done_callback(_consume_task_result)
+                pending_task.cancel()
+            return []
+        result = task.result()
+        logger.info("Fetched %d SDL entries", len(result))
+        return result
+    except Exception as exc:
+        logger.warning("SDL fetch failed: %s", exc)
+        return []
+
+
 def _parse_timestamp(value: Any) -> Optional[datetime]:
     if not value:
         return None
+
+
+    def _consume_task_result(task: asyncio.Task) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.debug("SDL fetch task finished with error", exc_info=True)
     if isinstance(value, datetime):
         return value
     raw = str(value)
@@ -580,6 +748,12 @@ def _parse_args() -> argparse.Namespace:
         help="Default metrics window in seconds",
     )
     parser.add_argument(
+        "--sdl_timeout_seconds",
+        type=float,
+        default=float(os.environ.get("CONNECTIVITY_SDL_TIMEOUT_SECONDS", "2.0")),
+        help="SDL fetch timeout in seconds (0 disables timeout)",
+    )
+    parser.add_argument(
         "--min_downstream_kbps",
         type=float,
         default=float(os.environ.get("CONNECTIVITY_MIN_DL_KBPS", "1000")),
@@ -667,6 +841,7 @@ def main() -> None:
         namespace=args.sdl_namespace,
         key_prefix=args.sdl_key_prefix,
         window_seconds=args.window_seconds,
+        sdl_timeout_seconds=args.sdl_timeout_seconds,
         thresholds=thresholds,
         device_defaults=device_defaults,
     )

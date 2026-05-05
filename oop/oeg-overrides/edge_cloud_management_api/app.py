@@ -15,6 +15,7 @@ def get_app_instance() -> FlaskApp:
     app.add_api(
         "connectivity_insights.yaml",
         strict_validation=False,
+        name="connectivity_insights",
     )
     return app
 
