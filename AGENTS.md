@@ -27,7 +27,11 @@ orca-framework/
 ├── bootstrap.sh          # One-time host setup — rarely needs changes
 ├── lab.sh                # Lab lifecycle (up/down/build/status/logs/ue/xapp)
 ├── docker-compose.yml    # Core stack — Open5GS, gNB, UE, OOP, Grafana
-├── ric-xapp.override.yml # Mounts ORCA xApps into the RIC runner
+├── docker/
+│   └── ric-xapp.override.yml # Mounts ORCA xApps into the RIC runner
+├── oop/
+│   ├── oeg-overrides/     # OEG overrides (Connectivity Insights spec/controller)
+│   └── srm-overrides/     # SRM overrides (Connectivity Insights spec/controller)
 │
 ├── config/
 │   ├── open5gs/          # 5GC config + subscriber DB (IMSI/K/OPc)
@@ -62,13 +66,16 @@ orca-framework/
 ./lab.sh build
 
 # Lab lifecycle
-./lab.sh up          # Start everything + auto-wire RIC E2 + auto-launch exposure xApp
+./lab.sh up          # Start everything + auto-wire RIC E2 + auto-launch exposure + insights xApps
 ./lab.sh down        # Stop everything
 ./lab.sh restart     # down + up
 ./lab.sh status      # Table of container health and ports
 ./lab.sh logs [svc]  # Tail logs (omit service name for all)
 ./lab.sh ue          # Start srsUE and attach to network
 ./lab.sh xapp        # Launch/relaunch exposure xApp for the currently registered gNB node
+./lab.sh insights    # Launch/relaunch Connectivity Insights xApp
+./lab.sh insights-check  # Query the Connectivity Insights xApp directly
+./lab.sh insights-e2e    # Query OEG -> SRM -> xApp Connectivity Insights path
 ./lab.sh clean       # Destroy all containers + volumes (destructive)
 ./lab.sh shell [svc] # Open bash in a running container
 
@@ -79,9 +86,9 @@ docker compose build oop-gateway oop-orchestrator
 cd repos/oran-sc-ric
 docker compose up -d
 docker compose logs -f e2term
-docker compose -f docker-compose.yml -f ../../ric-xapp.override.yml exec \
+docker compose -f docker-compose.yml -f ../../docker/ric-xapp.override.yml exec \
   python_xapp_runner sh -lc "RIC_XAPP_LIB_DIR=/opt/xApps python3 /opt/orca-xapps/exposure_xapp.py"
-docker compose -f docker-compose.yml -f ../../ric-xapp.override.yml exec \
+docker compose -f docker-compose.yml -f ../../docker/ric-xapp.override.yml exec \
   python_xapp_runner sh -lc "python3 /opt/orca-xapps/connectivity_insights_xapp.py --port 8093"
 docker exec ric_dbaas redis-cli --raw KEYS '{e2Manager},RAN:*'
 ```
@@ -97,6 +104,7 @@ Three Docker bridge networks:
 | `core` | `10.53.1.0/24` | 5GC NFs + gNB N2/N3 |
 | `ran` | `10.53.2.0/24` | gNB↔UE ZMQ RF + gNB↔RIC E2 |
 | `oop` | `10.53.3.0/24` | OOP↔5GC southbound (NEF/PCF) |
+| `xapps` | `10.53.4.0/24` | SRM↔xApp HTTP bridge |
 
 **Fixed IPs — do not change without updating all referencing configs:**
 
@@ -111,10 +119,15 @@ Three Docker bridge networks:
 | RIC e2term | ran | `10.53.2.100` | gNB E2 connects here |
 | `lab_oop_gateway` | oop | `10.53.3.30` | — |
 | `lab_oop_orchestrator` | oop | `10.53.3.40` | — |
+| `lab_oop_orchestrator` | xapps | `10.53.4.40` | SRM→xApp bridge |
+| `python_xapp_runner` | xapps | `10.53.4.50` | Connectivity Insights HTTP server |
 
 The `ran` network is named `lab_ran` explicitly in docker-compose.yml because
 `repos/oran-sc-ric/docker-compose.yml` references it as an external network.
 Do not rename it.
+
+The `xapps` network is named `lab_xapps` and is shared between the lab compose
+stack and the RIC compose stack. `lab.sh up` ensures it exists. Do not rename it.
 
 ---
 
@@ -145,6 +158,11 @@ cloned into `repos/openop/` by `bootstrap.sh`:
 
 Both images are built during `./lab.sh build`. Do not edit files inside
 `repos/` — patch via volume mounts if needed.
+
+Connectivity Insights path:
+- OEG endpoint: `http://localhost:8080/oeg/1.0.0/connectivity-insights`
+- SRM endpoint: `http://localhost:8090/srm/1.0.0/insights/connectivity-insights`
+- xApp endpoint: `http://localhost:8093/connectivity-insights`
 
 ---
 
@@ -217,6 +235,19 @@ The CAMARA layer uses the upstream ETSI OpenOP repos cloned into `repos/openop/`
 Both are built from source during `./lab.sh build` and used directly as
 Docker services (`oop-gateway`, `oop-orchestrator`).
 
+### Connectivity Insights JSON serialization (status: RESOLVED)
+When Pydantic is not installed in `python_xapp_runner`, the fallback model must
+recursively dump nested models to ensure JSON serialization. Otherwise
+`/connectivity-insights` appears to hang while encoding the response.
+
+### OEG Connexion ASGI query params (status: RESOLVED)
+Under Connexion ASGI, use `request.query_params` instead of `request.args` to
+extract query parameters in the OEG controller.
+
+### OEG blueprint name collision (status: RESOLVED)
+`add_api()` must supply a unique `name` when registering
+`connectivity_insights.yaml` to avoid the `/oeg/1.0.0` blueprint conflict.
+
 ### OCUDU gNB ZMQ build (status: RESOLVED)
 Must be built with `-DENABLE_EXPORT=ON -DENABLE_ZEROMQ=ON`.
 This is set in `docker-compose.yml` under `ocudu-gnb.build.args.EXTRA_CMAKE_ARGS`.
@@ -253,6 +284,7 @@ Expected success path after fix:
   Currently only `lab_open5gs` (UPF TUN device) and `srsue` need it.
 - **Never commit real credentials** — subscriber DB contains test-only values.
 - **Never rename the `lab_ran` network** — referenced externally by oran-sc-ric.
+- **Never rename the `lab_xapps` network** — shared between lab and RIC stacks.
 - **Never hardcode RAN node IDs** for xApp launch — always resolve from dbaas.
 - **Do not copy RIC xApp libs into `xapps/`** — reuse `repos/oran-sc-ric/xApps/python/lib` via `ric-xapp.override.yml`.
 
