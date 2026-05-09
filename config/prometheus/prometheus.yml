@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: "open5gs"
+    static_configs:
+      - targets: ["10.53.1.2:9090"]
+
+  - job_name: "orca_gnb_metrics"
+    static_configs:
+      - targets: ["10.53.1.61:9102"]

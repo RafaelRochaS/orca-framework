@@ -141,13 +141,18 @@ cmd_up() {
   fi
 
   # Step 3: ETSI OpenOP (CAMARA API Gateway + Orchestrator)
-  info "Step 3/4 — Starting ETSI OpenOP (CAMARA layer)..."
+  info "Step 3/5 — Starting ETSI OpenOP (CAMARA layer)..."
   docker compose -f "${COMPOSE_FILE}" up -d oop-gateway oop-orchestrator
   _wait_healthy "oop-gateway" 60
   success "  OpenOP services are up"
 
-  # Step 4: OCUDU gNB (connects to both 5GC and RIC)
-  info "Step 4/4 — Starting OCUDU gNB (ZMQ)..."
+  # Step 4: Observability (Prometheus + Grafana)
+  info "Step 4/5 — Starting observability (Prometheus + Grafana)..."
+  docker compose -f "${COMPOSE_FILE}" up -d prometheus grafana gnb-metrics-exporter
+  success "  Observability stack is up"
+
+  # Step 5: OCUDU gNB (connects to both 5GC and RIC)
+  info "Step 5/5 — Starting OCUDU gNB (ZMQ)..."
   docker compose -f "${COMPOSE_FILE}" up -d ocudu-gnb
   sleep 5
   success "  OCUDU gNB started"
@@ -194,6 +199,7 @@ cmd_up() {
   echo -e "  CAMARA API GW  → ${CYAN}http://localhost:8080${NC}"
   echo -e "  OOP Dashboard  → ${CYAN}http://localhost:8090${NC}"
   echo -e "  Connectivity Insights → ${CYAN}http://localhost:${INSIGHTS_HTTP_PORT}/connectivity-insights${NC}"
+  echo -e "  Prometheus     → ${CYAN}http://localhost:9090${NC}"
   echo -e "  Grafana        → ${CYAN}http://localhost:3000${NC}  (admin/admin)"
   echo ""
   echo -e "  To attach a UE: ${YELLOW}./lab.sh ue${NC}"

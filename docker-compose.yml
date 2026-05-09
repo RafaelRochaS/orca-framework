@@ -41,6 +41,7 @@ volumes:
   mongodb_data:
   open5gs_config:
   grafana_data:
+  prometheus_data:
 
 # =============================================================================
 # 1. DATABASE — MongoDB (required by Open5GS for subscriber DB and NF config)
@@ -262,7 +263,48 @@ services:
       - ./docker/edgecloud-mock.conf:/etc/nginx/nginx.conf:ro
 
   # =============================================================================
-  # 7. GRAFANA — Observability dashboard for RAN/core metrics
+  # 7. PROMETHEUS — Metrics scraper for RAN/core metrics
+  # =============================================================================
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: lab_prometheus
+    restart: unless-stopped
+    networks:
+      core:
+        ipv4_address: 10.53.1.60
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+
+  # =============================================================================
+  # 8. gNB METRICS EXPORTER — Exposes Connectivity Insights metrics to Prometheus
+  # =============================================================================
+  gnb-metrics-exporter:
+    image: python:3.11-slim
+    container_name: lab_gnb_metrics_exporter
+    restart: unless-stopped
+    networks:
+      core:
+        ipv4_address: 10.53.1.61
+      xapps:
+        ipv4_address: 10.53.4.60
+    environment:
+      CONNECTIVITY_INSIGHTS_URL: "http://python_xapp_runner:8093/connectivity-insights"
+      CONNECTIVITY_WINDOW_SECONDS: "60"
+      CONNECTIVITY_TIMEOUT_SECONDS: "2.5"
+      EXPORTER_PORT: "9102"
+    volumes:
+      - ./observability/gnb_metrics_exporter.py:/app/gnb_metrics_exporter.py:ro
+    command: ["python", "/app/gnb_metrics_exporter.py"]
+
+  # =============================================================================
+  # 9. GRAFANA — Observability dashboard for RAN/core metrics
   # =============================================================================
   grafana:
     image: grafana/grafana:10.4.0
