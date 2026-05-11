@@ -96,7 +96,7 @@ cmd_build() {
   info "Building OOP Gateway (Open Exposure Gateway)..."
   docker compose -f "${COMPOSE_FILE}" build oop-gateway
   info "Building OOP Service Resource Manager..."
-  docker compose -f "${COMPOSE_FILE}" build oop-orchestrator
+  docker compose -f "${COMPOSE_FILE}" build oop-srm
   success "All images built. Run ./lab.sh up to start the lab."
 }
 
@@ -140,9 +140,9 @@ cmd_up() {
     warn "  RIC repo not found — skipping (run bootstrap.sh first)"
   fi
 
-  # Step 3: ETSI OpenOP (CAMARA API Gateway + Orchestrator)
+  # Step 3: ETSI OpenOP (CAMARA API Gateway + SRM)
   info "Step 3/5 — Starting ETSI OpenOP (CAMARA layer)..."
-  docker compose -f "${COMPOSE_FILE}" up -d oop-gateway oop-orchestrator
+  docker compose -f "${COMPOSE_FILE}" up -d oop-gateway oop-srm
   _wait_healthy "oop-gateway" 60
   success "  OpenOP services are up"
 

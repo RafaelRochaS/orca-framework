@@ -89,7 +89,6 @@ services:
       oop:
         ipv4_address: 10.53.3.20    # OOP southbound (NEF/PCF)
     ports:
-      - "9999:9999"           # Open5GS WebUI
       - "38412:38412/sctp"    # N2 — NGAP (AMF) — exposed for debugging
     volumes:
       - ./config/open5gs/open5gs.yaml:/opt/open5gs/etc/open5gs/open5gs.yaml:ro
@@ -109,6 +108,24 @@ services:
       timeout: 3s
       retries: 20
       start_period: 15s
+
+  # =============================================================================
+  # 2b. OPEN5GS WEBUI — Web interface for subscriber management
+  # =============================================================================
+  open5gs-webui:
+    image: open5gs/open5gs-webui:latest
+    container_name: lab_open5gs_webui
+    restart: unless-stopped
+    networks:
+      core:
+        ipv4_address: 10.53.1.3
+    ports:
+      - "9999:9999"           # Open5GS WebUI
+    environment:
+      DB_URI: "mongodb://10.53.1.10/open5gs"
+    depends_on:
+      mongodb:
+        condition: service_healthy
 
   # =============================================================================
   # 3. OCUDU gNB — NG-RAN base station (ZMQ RF, E2 agent for RIC)
@@ -194,7 +211,7 @@ services:
       TOKEN_ENDPOINT: "http://dummy"
       PARTNER_API_ROOT: "http://dummy"
       AVAIL_ZONE_NOTIF_LINK: "http://dummy"
-      SRM_HOST: "http://10.53.3.40:8080/srm/1.0.0"     # OOP Orchestrator (SRM role)
+      SRM_HOST: "http://10.53.3.40:8080/srm/1.0.0"     # OOP SRM
       CONNECTIVITY_INSIGHTS_TIMEOUT: "5"
       CONNECTIVITY_INSIGHTS_SRM_BASE_URL: "http://10.53.3.40:8080/srm/1.0.0/insights"
     volumes:
@@ -218,12 +235,12 @@ services:
   #    Built from the upstream repo: labs.etsi.org/rep/oop/code/service-resource-manager
   #    Connexion/Flask app on port 8080 — receives requests from OEG
   # =============================================================================
-  oop-orchestrator:
+  oop-srm:
     build:
       context: ./repos/openop/service-resource-manager/service-resource-manager-implementation
       dockerfile: Dockerfile
-    image: lab_oop_orchestrator:latest
-    container_name: lab_oop_orchestrator
+    image: lab_oop_srm:latest
+    container_name: lab_oop_srm
     restart: unless-stopped
     networks:
       oop:

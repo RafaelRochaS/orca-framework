@@ -243,7 +243,7 @@ curl -X POST http://localhost:8080/camara/device-status/v0/connectivity \
 
 4. Rebuild and restart:
    ```bash
-   docker compose build oop-gateway oop-orchestrator
+  docker compose build oop-gateway oop-srm
    ./lab.sh restart
    ```
 
@@ -382,7 +382,7 @@ match `config/ocudu/ue_zmq.conf`.
 **OOP Gateway returns 500:**
 ```bash
 ./lab.sh logs oop-gateway
-./lab.sh logs oop-orchestrator
+./lab.sh logs oop-srm
 ```
 The orchestrator attempts to reach the Open5GS PCF on startup. QoD sessions
 are tracked in memory and enforcement is best-effort during early startup.

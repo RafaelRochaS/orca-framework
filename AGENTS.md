@@ -80,7 +80,7 @@ orca-framework/
 ./lab.sh shell [svc] # Open bash in a running container
 
 # Rebuild only OOP services (fast — no C++ compile)
-docker compose build oop-gateway oop-orchestrator
+docker compose build oop-gateway oop-srm
 
 # RIC-specific (its own compose stack)
 cd repos/oran-sc-ric
@@ -118,8 +118,8 @@ Three Docker bridge networks:
 | `lab_ue` | ran | `10.53.2.40` | ZMQ TX socket |
 | RIC e2term | ran | `10.53.2.100` | gNB E2 connects here |
 | `lab_oop_gateway` | oop | `10.53.3.30` | — |
-| `lab_oop_orchestrator` | oop | `10.53.3.40` | — |
-| `lab_oop_orchestrator` | xapps | `10.53.4.40` | SRM→xApp bridge |
+| `lab_oop_srm` | oop | `10.53.3.40` | — |
+| `lab_oop_srm` | xapps | `10.53.4.40` | SRM→xApp bridge |
 | `python_xapp_runner` | xapps | `10.53.4.50` | Connectivity Insights HTTP server |
 
 The `ran` network is named `lab_ran` explicitly in docker-compose.yml because
@@ -233,7 +233,7 @@ The CAMARA layer uses the upstream ETSI OpenOP repos cloned into `repos/openop/`
 - `service-resource-manager` — SRM, CAMARA→infrastructure translation
 
 Both are built from source during `./lab.sh build` and used directly as
-Docker services (`oop-gateway`, `oop-orchestrator`).
+Docker services (`oop-gateway`, `oop-srm`).
 
 ### Connectivity Insights JSON serialization (status: RESOLVED)
 When Pydantic is not installed in `python_xapp_runner`, the fallback model must
@@ -297,5 +297,5 @@ Do not edit files inside `repos/` directly — instead, extend via volume mounts
 or contribute upstream. To rebuild after changes:
 
 ```bash
-docker compose build oop-gateway oop-orchestrator && ./lab.sh restart
+docker compose build oop-gateway oop-srm && ./lab.sh restart
 ```
