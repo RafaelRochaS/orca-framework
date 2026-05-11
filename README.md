@@ -57,11 +57,12 @@ It is designed as a foundation for:
 │      ┌─────────────────────────▼──────────────────────────┐     │
 │      │           ETSI OpenOP — CAMARA Layer               │     │
 │      │  ┌─────────────────┐   ┌──────────────────────┐    │     │
-│      │  │  API Gateway    │   │  Orchestrator        │    │     │
-│      │  │  CAMARA APIs:   │   │  CAMARA → 3GPP       │    │     │
-│      │  │  · QoD ✓        │   │  → O-RAN translation │    │     │
-│      │  │  · DevStatus ✓  │   │                      │    │     │
-│      │  │  · [extend here]│   │                      |    │     │
+│      │  │  OEG Gateway    │   │  SRM Orchestrator    │    │     │
+│      │  │  CAMARA APIs:   │   │  CAMARA → 3GPP/RAN   │    │     │
+│      │  │  · QoD ✓        │   │  translation         │    │     │
+│      │  │  · Traffic Infl │   │                      │    │     │
+│      │  │  · Connectivity │   │                      │    │     │
+│      │  │    Insights ✓   │   │                      │    │     │
 │      │  └─────────────────┘   └──────────────────────┘    │     │
 │      └────────────────────────────────────────────────────┘     │
 │                                                                 │
@@ -80,7 +81,7 @@ It is designed as a foundation for:
 | [srsRAN 4G / srsUE](https://github.com/srsran/srsRAN_4G) | ZMQ UE simulator | Built from source |
 | [Open5GS](https://open5gs.org) | 5G Core (all NFs) | `gradiant/open5gs:2.2.0` |
 | [O-RAN SC RIC](https://github.com/srsran/oran-sc-ric) | Near-RT RIC (i-Release) | Docker Compose (OCUDU-maintained) |
-| [ETSI OpenOP](https://oop.etsi.org) | CAMARA API gateway + orchestrator | Cloned from `labs.etsi.org/rep/oop/code/` |
+| [ETSI OpenOP](https://oop.etsi.org) | CAMARA OEG + SRM | Cloned into `repos/openop/` |
 | MongoDB | Subscriber database | `mongo:6.0` |
 | Grafana | Observability | `grafana/grafana:10.4.0` |
 
@@ -137,6 +138,7 @@ Services start in dependency order:
 2. O-RAN SC Near-RT RIC
 3. ETSI OpenOP CAMARA layer (gateway + orchestrator)
 4. OCUDU gNB (connects to both 5GC via N2 and RIC via E2)
+5. Exposure + Connectivity Insights xApps (auto-launched)
 
 ### 4. Attach a simulated UE
 
@@ -152,19 +154,15 @@ Services start in dependency order:
 ./lab.sh logs ocudu-gnb
 ```
 
-### 6. Validate UE end-to-end connectivity
+### 6. Validate Connectivity Insights end-to-end
 
 ```bash
-./lab.sh validate
+./lab.sh insights-check
+./lab.sh insights-e2e
 ```
 
-This command validates attach and data path end-to-end by checking:
-- gNB logs for UE control-plane activity (`InitialUEMessage` / `rrcSetupComplete`)
-- Open5GS logs for successful registration (`Registration complete`)
-- UE logs for NAS+PDU success (`Handling Registration Accept`, `PDU Session Establishment successful`)
-- UE tunnel interface (`tun_srsue`) IPv4 assignment
-- UE route preference so internet probes use the UPF tunnel (`tun_srsue`)
-- UE reachability to UPF gateway (`10.45.0.1`) and internet probe (`1.1.1.1` or `8.8.8.8`)
+`insights-check` hits the xApp directly, while `insights-e2e` exercises the
+full OEG → SRM → xApp path.
 
 ---
 
@@ -175,7 +173,8 @@ This command validates attach and data path end-to-end by checking:
 | Open5GS WebUI | `http://localhost:9999` | admin / 1423 |
 | CAMARA API Gateway | `http://localhost:8080` | — |
 | Swagger UI (API docs) | `http://localhost:8080/docs` | — |
-| OOP Orchestrator | `http://localhost:8090` | — |
+| OOP SRM (Orchestrator) | `http://localhost:8090` | — |
+| Connectivity Insights xApp | `http://localhost:8093` | — |
 | Grafana | `http://localhost:3000` | admin / admin |
 
 > **Cloud VM users:** replace `localhost` with your public IP and open the
@@ -185,41 +184,19 @@ This command validates attach and data path end-to-end by checking:
 
 ## CAMARA API Reference
 
-### Quality on Demand — create a QoS session
+### Connectivity Insights (xApp-backed)
 
 ```bash
-curl -X POST http://localhost:8080/camara/quality-on-demand/v0/sessions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "device": {
-      "ipv4_address": {"private_address": "10.45.0.2"}
-    },
-    "application_server": {"ipv4_address": "10.0.0.1"},
-    "qos_profile": "QOS_L",
-    "duration": 3600
-  }'
+curl -s "http://localhost:8093/connectivity-insights?windowSeconds=60"
+curl -s "http://localhost:8090/srm/1.0.0/insights/connectivity-insights?windowSeconds=60"
+curl -s "http://localhost:8080/oeg/1.0.0/connectivity-insights?windowSeconds=60"
 ```
 
-### QoS Profiles
+### QoD and other CAMARA APIs
 
-| Profile | DL | UL | Latency | 5QI |
-|---|---|---|---|---|
-| `QOS_E` | best effort | best effort | — | 9 |
-| `QOS_S` | ≥ 2 Mbps | ≥ 1 Mbps | < 300 ms | 8 |
-| `QOS_M` | ≥ 10 Mbps | ≥ 5 Mbps | < 100 ms | 7 |
-| `QOS_L` | ≥ 50 Mbps | ≥ 25 Mbps | < 50 ms | 1 (GBR) |
-
-The QoD → 5GC PCF + RIC A1 translation is handled by the Orchestrator.
-The profile-to-5QI mapping lives in `oop/gateway/src/routers/qod.py`
-(`QOS_PROFILE_MAP`) and is the primary extension point for custom profiles.
-
-### Device Status
-
-```bash
-curl -X POST http://localhost:8080/camara/device-status/v0/connectivity \
-  -H "Content-Type: application/json" \
-  -d '{"ipv4_address": "10.45.0.2"}'
-```
+QoD, Traffic Influence, and other baseline APIs are provided by the upstream
+ETSI OpenOP OEG + SRM. Use the Swagger UI at `http://localhost:8080/docs` to
+inspect available endpoints and schemas.
 
 ---
 
@@ -227,25 +204,16 @@ curl -X POST http://localhost:8080/camara/device-status/v0/connectivity \
 
 ### Adding a new CAMARA API
 
-1. Create `oop/gateway/src/routers/my_api.py` following the QoD pattern in
-   `qod.py`. The structure is: Pydantic models → FastAPI router → async call
-   to the Orchestrator's internal API.
+The CAMARA layer uses upstream ETSI OpenOP components. Do not edit files in
+`repos/openop/` directly. Extend via overrides:
 
-2. Register it in `oop/gateway/src/main.py`:
-   ```python
-   from .routers import my_api
-   app.include_router(my_api.router, prefix="/camara/my-api/v0")
-   ```
-
-3. Add southbound translation logic in `oop/orchestrator/src/main.py` —
-   map your API parameters to 3GPP NF calls (PCF, SMF, NEF) and/or
-   O-RAN A1 policies.
-
-4. Rebuild and restart:
-   ```bash
+1. Add an OEG override under `oop/oeg-overrides/` (spec + controller).
+2. Add a matching SRM override under `oop/srm-overrides/` (spec + controller).
+3. Rebuild and restart:
+  ```bash
   docker compose build oop-gateway oop-srm
-   ./lab.sh restart
-   ```
+  ./lab.sh restart
+  ```
 
 ### Developing an xApp
 
@@ -256,12 +224,13 @@ xApp pattern used in ORCA:
 2. **E2SM-KPM subscription** — monitors per-UE metrics (throughput, delay)
 3. **E2SM-RC control** — adjusts RAN scheduler parameters on SLA breach
 
-To deploy your xApp into the RIC:
+To deploy your xApp into the RIC, mount it via `docker/ric-xapp.override.yml`
+and run it inside the RIC python runner:
 
 ```bash
-cp xapps/my-xapp/my_xapp.py repos/oran-sc-ric/xApps/python/
 cd repos/oran-sc-ric
-docker compose exec python_xapp_runner python3 ./my_xapp.py
+docker compose -f docker-compose.yml -f ../../docker/ric-xapp.override.yml exec \
+  python_xapp_runner sh -lc "RIC_XAPP_LIB_DIR=/opt/xApps python3 /opt/orca-xapps/my_xapp.py"
 ```
 
 Launch the built-in KPM monitoring xApp:
@@ -287,23 +256,16 @@ orca-framework/
 │   ├── ocudu/
 │   │   ├── gnb_zmq.yaml            # gNB — ZMQ RF + E2 agent config
 │   │   └── ue_zmq.conf             # srsUE — ZMQ RF config
-│   ├── oop/
-│   │   ├── gateway.yaml
-│   │   └── orchestrator.yaml
 │   └── grafana/
 │
 ├── oop/
-│   ├── gateway/                    # CAMARA API northbound gateway (FastAPI)
-│   │   └── src/
-│   │       ├── main.py             # FastAPI app, router registration
-│   │       └── routers/
-│   │           ├── qod.py          # Quality on Demand API ← extend here
-│   │           └── device_status.py
-│   └── orchestrator/               # CAMARA → 5GC + RIC translation engine
-│       └── src/
-│           └── main.py             # PCF + A1 southbound logic ← extend here
+│   ├── oeg-overrides/              # OEG overrides (Connectivity Insights)
+│   └── srm-overrides/              # SRM overrides (Connectivity Insights)
 │
 ├── xapps/
+│   ├── exposure-xapp/
+│   │   ├── exposure_xapp.py        # KPM → SDL metrics
+│   │   └── connectivity_insights_xapp.py
 │   └── qod-xapp/
 │       └── qod_xapp.py             # QoD xApp scaffold (KPM + RC)
 │
@@ -384,8 +346,8 @@ match `config/ocudu/ue_zmq.conf`.
 ./lab.sh logs oop-gateway
 ./lab.sh logs oop-srm
 ```
-The orchestrator attempts to reach the Open5GS PCF on startup. QoD sessions
-are tracked in memory and enforcement is best-effort during early startup.
+Check that OEG is reaching SRM, then confirm SRM can reach the xApp over the
+`lab_xapps` network.
 
 <!-- ---
 
