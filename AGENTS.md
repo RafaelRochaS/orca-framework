@@ -159,6 +159,12 @@ cloned into `repos/openop/` by `bootstrap.sh`:
 Both images are built during `./lab.sh build`. Do not edit files inside
 `repos/` — patch via volume mounts if needed.
 
+Architecture flow:
+- OEG fronts the CAMARA APIs and forwards requests to SRM.
+- SRM handles translation and talks southbound to the 5G Core (3GPP NFs)
+  and to the RIC (A1). The 5G Core does not connect directly to the RIC.
+- The gNB is the only component that connects to both Core (N2) and RIC (E2AP).
+
 Connectivity Insights path:
 - OEG endpoint: `http://localhost:8080/oeg/1.0.0/connectivity-insights`
 - SRM endpoint: `http://localhost:8090/srm/1.0.0/insights/connectivity-insights`

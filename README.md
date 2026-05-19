@@ -32,46 +32,9 @@ It is designed as a foundation for:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Ubuntu 24.04 VM                          │
-│                                                                 │
-│  ┌──────────────┐  ZMQ RF   ┌─────────────────────────────┐     │
-│  │   srsUE      │◄─────────►│  OCUDU gNB                  │     │
-│  │  (lab_ue)    │           │  · ZMQ RF (no SDR hardware) │     │
-│  └──────────────┘           │  · E2 agent (KPM + RC)      │     │
-│                             └──────────┬──────────────────┘     │
-│                                        │ N2/NGAP (SCTP)         │
-│                    ┌───────────────────▼──────────────────┐     │
-│                    │       Open5GS 5G Core                │     │
-│                    │  AMF · SMF · UPF · PCF · NEF · ...   │     │
-│                    └───────────────────┬──────────────────┘     │
-│                                        │                        │
-│      ┌─────────────────────────────────▼──────────────────┐     │
-│      │         O-RAN SC Near-RT RIC                       │     │
-│      │  · E2 termination      · A1 mediator               │     │
-│      │  · RMR message router  · Subscription manager      │     │
-│      │  · xApp runtime  ◄── develop your xApps here       │     │
-│      └─────────────────────────┬──────────────────────────┘     │
-│                                │ A1 interface                   │
-│      ┌─────────────────────────▼──────────────────────────┐     │
-│      │           ETSI OpenOP — CAMARA Layer               │     │
-│      │  ┌─────────────────┐   ┌──────────────────────┐    │     │
-│      │  │  OEG Gateway    │   │  SRM Orchestrator    │    │     │
-│      │  │  CAMARA APIs:   │   │  CAMARA → 3GPP/RAN   │    │     │
-│      │  │  · QoD ✓        │   │  translation         │    │     │
-│      │  │  · Traffic Infl │   │                      │    │     │
-│      │  │  · Connectivity │   │                      │    │     │
-│      │  │    Insights ✓   │   │                      │    │     │
-│      │  └─────────────────┘   └──────────────────────┘    │     │
-│      └────────────────────────────────────────────────────┘     │
-│                                                                 │
-│  ┌──────────────┐                                               │
-│  │   Grafana    │ ← RAN + Core metrics (Prometheus)             │
-│  │   :3000      │                                               │
-│  └──────────────┘                                               │
-└─────────────────────────────────────────────────────────────────┘
-```
+The architecture follows standard 3GPP RAN and Core components, as well as GSMA/CAMARA and O-RAN resources.
+
+![Architecture][arch-image]
 
 ### Component versions
 
@@ -381,3 +344,5 @@ Please open an issue before submitting a large PR to align on design direction.
 
 Apache License 2.0 — consistent with ETSI OpenOP, OCUDU, CAMARA Project,
 and O-RAN SC licensing. See [LICENSE](LICENSE) for details.
+
+[arch-image]: ./docs/arch.jpeg "Architecture"
