@@ -26,6 +26,13 @@ def main() -> None:
         pythonic_params=True,
         base_path='/srm/1.0.0/insights',
     )
+    app.add_api(
+        'qos_profiles.yaml',
+        strict_validation=False,
+        arguments={'title': 'QoS Profiles API'},
+        pythonic_params=True,
+        base_path='/srm/1.0.0',
+    )
     app.run(port=8080)
 
 

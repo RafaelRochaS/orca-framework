@@ -1,0 +1,476 @@
+openapi: 3.0.3
+info:
+  title: QoS Profiles API (OEG)
+  description: |
+    Quality of Service (QoS) Profiles API based on CAMARA Quality On Demand r3.2.
+    This API exposes profile discovery to API consumers.
+  version: 1.1.0
+servers:
+  - url: http://virtualserver:8080/oeg/1.0.0
+paths:
+  /qos-profiles/v1/retrieve-qos-profiles:
+    post:
+      tags:
+        - QoS Profiles
+      summary: Retrieve QoS profiles
+      description: Returns QoS profiles that match the provided criteria.
+      operationId: edge_cloud_management_api.controllers.qos_profiles_controller.retrieve_qos_profiles
+      parameters:
+        - $ref: "#/components/parameters/x-correlator"
+      requestBody:
+        description: Parameters to query QoS profiles for a given device
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QosProfileDeviceRequest"
+      responses:
+        "200":
+          description: Contains information about QoS profiles
+          headers:
+            x-correlator:
+              $ref: "#/components/headers/x-correlator"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/QosProfile"
+        "400":
+          $ref: "#/components/responses/Generic400"
+        "401":
+          $ref: "#/components/responses/Generic401"
+        "403":
+          $ref: "#/components/responses/Generic403"
+        "404":
+          $ref: "#/components/responses/GenericDevice404"
+        "422":
+          $ref: "#/components/responses/Generic422"
+        "429":
+          $ref: "#/components/responses/Generic429"
+  /qos-profiles/v1/qos-profiles/{name}:
+    get:
+      tags:
+        - QoS Profiles
+      summary: Get QoS profile by name
+      description: Returns a QoS profile that matches the given name.
+      operationId: edge_cloud_management_api.controllers.qos_profiles_controller.get_qos_profile
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: QoS profile name
+          schema:
+            $ref: "#/components/schemas/QosProfileName"
+        - $ref: "#/components/parameters/x-correlator"
+      responses:
+        "200":
+          description: Contains information about the QoS profile
+          headers:
+            x-correlator:
+              $ref: "#/components/headers/x-correlator"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QosProfile"
+        "400":
+          $ref: "#/components/responses/Generic400"
+        "401":
+          $ref: "#/components/responses/Generic401"
+        "403":
+          $ref: "#/components/responses/Generic403"
+        "404":
+          $ref: "#/components/responses/Generic404"
+        "429":
+          $ref: "#/components/responses/Generic429"
+components:
+  securitySchemes:
+    openId:
+      type: openIdConnect
+      openIdConnectUrl: https://example.com/.well-known/openid-configuration
+  parameters:
+    x-correlator:
+      name: x-correlator
+      in: header
+      description: Correlation id for the different services
+      schema:
+        $ref: "#/components/schemas/XCorrelator"
+  headers:
+    x-correlator:
+      description: Correlation id for the different services
+      schema:
+        $ref: "#/components/schemas/XCorrelator"
+  schemas:
+    XCorrelator:
+      description: Value for the x-correlator header
+      type: string
+      pattern: "^[a-zA-Z0-9-_:;.\\/<>{}]{0,256}$"
+      example: "b4333c46-49c0-4f62-80d7-f0ef930f1c46"
+    QosProfile:
+      description: Data type with attributes of a QoS profile
+      type: object
+      required:
+        - name
+        - status
+      properties:
+        name:
+          $ref: "#/components/schemas/QosProfileName"
+        description:
+          description: A description of the QoS profile.
+          type: string
+          example: "QoS profile for video streaming"
+        status:
+          $ref: "#/components/schemas/QosProfileStatusEnum"
+        countryAvailability:
+          description: List of countries and networks where the profile is available.
+          allOf:
+            - $ref: "#/components/schemas/Availability"
+        targetMinUpstreamRate:
+          description: Target minimum upload rate for the QoS profile.
+          allOf:
+            - $ref: "#/components/schemas/Rate"
+        maxUpstreamRate:
+          description: Maximum best effort upload rate.
+          allOf:
+            - $ref: "#/components/schemas/Rate"
+        maxUpstreamBurstRate:
+          description: Maximum upstream burst rate for a limited period.
+          allOf:
+            - $ref: "#/components/schemas/Rate"
+        targetMinDownstreamRate:
+          description: Target minimum download rate for the QoS profile.
+          allOf:
+            - $ref: "#/components/schemas/Rate"
+        maxDownstreamRate:
+          description: Maximum best effort download rate.
+          allOf:
+            - $ref: "#/components/schemas/Rate"
+        maxDownstreamBurstRate:
+          description: Maximum downstream burst rate for a limited period.
+          allOf:
+            - $ref: "#/components/schemas/Rate"
+        minDuration:
+          description: Minimum duration for which the profile can be deployed.
+          allOf:
+            - $ref: "#/components/schemas/Duration"
+        maxDuration:
+          description: Maximum duration for which the profile can be deployed.
+          allOf:
+            - $ref: "#/components/schemas/Duration"
+        priority:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+          example: 20
+          description: Lower value indicates higher priority.
+        packetDelayBudget:
+          description: Maximum allowable one-way latency.
+          allOf:
+            - $ref: "#/components/schemas/Duration"
+        jitter:
+          description: Maximum allowed jitter for the 99th percentile.
+          allOf:
+            - $ref: "#/components/schemas/Duration"
+        packetErrorLossRate:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 10
+          example: 3
+          description: Packet loss rate exponent (10^-x).
+        l4sQueueType:
+          type: string
+          enum:
+            - non-l4s-queue
+            - l4s-queue
+            - mixed-queue
+          description: L4S queue type.
+        serviceClass:
+          type: string
+          description: Optional service class identifier.
+          enum:
+            - microsoft_voice
+            - microsoft_audio_video
+            - real_time_interactive
+            - multimedia_streaming
+            - broadcast_video
+            - low_latency_data
+            - high_throughput_data
+            - low_priority_data
+            - standard
+    QosProfileName:
+      description: A unique name for identifying a specific QoS profile.
+      type: string
+      example: voice
+      minLength: 3
+      maxLength: 256
+      pattern: "^[a-zA-Z0-9_.-]+$"
+    QosProfileStatusEnum:
+      description: The current status of the QoS profile.
+      type: string
+      enum:
+        - ACTIVE
+        - INACTIVE
+        - DEPRECATED
+    Rate:
+      description: Specification of rate
+      type: object
+      properties:
+        value:
+          description: Quantity of rate
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 1024
+          example: 10
+        unit:
+          $ref: "#/components/schemas/RateUnitEnum"
+    RateUnitEnum:
+      description: Units of rate
+      type: string
+      enum:
+        - bps
+        - kbps
+        - Mbps
+        - Gbps
+        - Tbps
+    Duration:
+      description: Specification of duration
+      type: object
+      properties:
+        value:
+          description: Quantity of duration
+          type: integer
+          format: int32
+          minimum: 1
+          example: 12
+        unit:
+          $ref: "#/components/schemas/TimeUnitEnum"
+    TimeUnitEnum:
+      description: Units of time
+      type: string
+      enum:
+        - Days
+        - Hours
+        - Minutes
+        - Seconds
+        - Milliseconds
+        - Microseconds
+        - Nanoseconds
+    QosProfileDeviceRequest:
+      description: Request object for QoS profiles for a given device
+      type: object
+      properties:
+        device:
+          $ref: "#/components/schemas/Device"
+        name:
+          $ref: "#/components/schemas/QosProfileName"
+        status:
+          $ref: "#/components/schemas/QosProfileStatusEnum"
+    Availability:
+      description: A list of countries and networks where the profile is available
+      type: array
+      items:
+        type: object
+        required:
+          - countryName
+        properties:
+          countryName:
+            description: ISO 3166-2 country code
+            type: string
+            pattern: "^[A-Z]{2}$"
+            example: "GB"
+          networks:
+            description: List of networks within the country
+            type: array
+            items:
+              type: string
+              description: Network identifier (PLMN)
+              example: "23591"
+            example: ["23591", "23415"]
+    Device:
+      description: End-user equipment able to connect to a mobile network.
+      type: object
+      minProperties: 1
+      properties:
+        phoneNumber:
+          $ref: "#/components/schemas/PhoneNumber"
+        networkAccessIdentifier:
+          $ref: "#/components/schemas/NetworkAccessIdentifier"
+        ipv4Address:
+          $ref: "#/components/schemas/DeviceIpv4Addr"
+        ipv6Address:
+          $ref: "#/components/schemas/DeviceIpv6Address"
+    NetworkAccessIdentifier:
+      description: Public identifier addressing a subscription in a mobile network.
+      type: string
+      example: "123456789@domain.com"
+    PhoneNumber:
+      description: Public identifier addressing a telephone subscription.
+      type: string
+      pattern: "^\\+[1-9][0-9]{4,14}$"
+      example: "+123456789"
+    DeviceIpv4Addr:
+      description: Device IPv4 address and port information.
+      type: object
+      properties:
+        publicAddress:
+          $ref: "#/components/schemas/SingleIpv4Addr"
+        privateAddress:
+          $ref: "#/components/schemas/SingleIpv4Addr"
+        publicPort:
+          $ref: "#/components/schemas/Port"
+      anyOf:
+        - required: [publicAddress, privateAddress]
+        - required: [publicAddress, publicPort]
+    DeviceIpv6Address:
+      description: Device IPv6 address.
+      type: string
+      format: ipv6
+      example: 2001:db8:85a3:8d3:1319:8a2e:370:7344
+    Port:
+      description: TCP or UDP port number
+      type: integer
+      minimum: 0
+      maximum: 65535
+    SingleIpv4Addr:
+      description: A single IPv4 address with no subnet mask
+      type: string
+      format: ipv4
+      example: 203.0.113.0
+    ErrorInfo:
+      description: Common schema for errors
+      type: object
+      required:
+        - status
+        - code
+        - message
+      properties:
+        status:
+          type: integer
+          description: HTTP response status code
+        code:
+          type: string
+          description: Human-readable error code
+        message:
+          type: string
+          description: Human-readable description of the error
+  responses:
+    Generic400:
+      description: Bad Request
+      headers:
+        x-correlator:
+          $ref: "#/components/headers/x-correlator"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorInfo"
+              - type: object
+                properties:
+                  status:
+                    enum: [400]
+                  code:
+                    enum: [INVALID_ARGUMENT, OUT_OF_RANGE]
+    Generic401:
+      description: Unauthorized
+      headers:
+        x-correlator:
+          $ref: "#/components/headers/x-correlator"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorInfo"
+              - type: object
+                properties:
+                  status:
+                    enum: [401]
+                  code:
+                    enum: [UNAUTHENTICATED]
+    Generic403:
+      description: Forbidden
+      headers:
+        x-correlator:
+          $ref: "#/components/headers/x-correlator"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorInfo"
+              - type: object
+                properties:
+                  status:
+                    enum: [403]
+                  code:
+                    enum: [PERMISSION_DENIED]
+    Generic404:
+      description: Not found
+      headers:
+        x-correlator:
+          $ref: "#/components/headers/x-correlator"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorInfo"
+              - type: object
+                properties:
+                  status:
+                    enum: [404]
+                  code:
+                    enum: [NOT_FOUND]
+    GenericDevice404:
+      description: Device identifier not found
+      headers:
+        x-correlator:
+          $ref: "#/components/headers/x-correlator"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorInfo"
+              - type: object
+                properties:
+                  status:
+                    enum: [404]
+                  code:
+                    enum: [NOT_FOUND, IDENTIFIER_NOT_FOUND]
+    Generic422:
+      description: Unprocessable Content
+      headers:
+        x-correlator:
+          $ref: "#/components/headers/x-correlator"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorInfo"
+              - type: object
+                properties:
+                  status:
+                    enum: [422]
+                  code:
+                    enum:
+                      - SERVICE_NOT_APPLICABLE
+                      - UNSUPPORTED_IDENTIFIER
+                      - UNNECESSARY_IDENTIFIER
+    Generic429:
+      description: Too Many Requests
+      headers:
+        x-correlator:
+          $ref: "#/components/headers/x-correlator"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorInfo"
+              - type: object
+                properties:
+                  status:
+                    enum: [429]
+                  code:
+                    enum:
+                      - QUOTA_EXCEEDED
+                      - TOO_MANY_REQUESTS

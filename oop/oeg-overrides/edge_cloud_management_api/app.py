@@ -17,6 +17,11 @@ def get_app_instance() -> FlaskApp:
         strict_validation=False,
         name="connectivity_insights",
     )
+    app.add_api(
+        "qos_profiles.yaml",
+        strict_validation=False,
+        name="qos_profiles",
+    )
     return app
 
 
